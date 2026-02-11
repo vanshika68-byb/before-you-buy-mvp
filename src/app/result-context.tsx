@@ -7,29 +7,50 @@ import {
   type ReactNode,
 } from "react";
 
-type AnalyzeResult =
-  | {
-      status: "avoid";
-      avoid_conditions: string[];
-      explanation: string;
-      confidence: string;
-    }
-  | {
-      status: "unknown";
-    };
+export type Extraction = {
+  ingredients: string[];
+  detected_actives: string[];
+  concentration_clues: string;
+  usage_instructions: string;
+};
+
+export type RiskAssessment = {
+  avoid_if: string[];
+  risk_reasons: string[];
+  confidence_level: "low" | "medium" | "high";
+  confidence_reason: string;
+  disclaimer: string;
+};
 
 type ResultContextValue = {
-  result: AnalyzeResult | null;
-  setResult: (value: AnalyzeResult | null) => void;
+  extraction: Extraction | null;
+  setExtraction: (value: Extraction | null) => void;
+  riskAssessment: RiskAssessment | null;
+  setRiskAssessment: (value: RiskAssessment | null) => void;
+  submittedUrl: string | null;
+  setSubmittedUrl: (value: string | null) => void;
 };
 
 const ResultContext = createContext<ResultContextValue | undefined>(undefined);
 
 export function ResultProvider({ children }: { children: ReactNode }) {
-  const [result, setResult] = useState<AnalyzeResult | null>(null);
+  const [extraction, setExtraction] = useState<Extraction | null>(null);
+  const [riskAssessment, setRiskAssessment] = useState<RiskAssessment | null>(
+    null
+  );
+  const [submittedUrl, setSubmittedUrl] = useState<string | null>(null);
 
   return (
-    <ResultContext.Provider value={{ result, setResult }}>
+    <ResultContext.Provider
+      value={{
+        extraction,
+        setExtraction,
+        riskAssessment,
+        setRiskAssessment,
+        submittedUrl,
+        setSubmittedUrl,
+      }}
+    >
       {children}
     </ResultContext.Provider>
   );
