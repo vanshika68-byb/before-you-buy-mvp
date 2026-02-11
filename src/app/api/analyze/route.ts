@@ -28,6 +28,12 @@ function extractVisibleText(html: string): string {
   return withoutTags.replace(/\s+/g, " ").trim();
 }
 
+function extractPageTitle(html: string): string {
+  const match = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  if (!match) return "";
+  return match[1].replace(/\s+/g, " ").trim();
+}
+
 async function runRiskAssessment(
   extractedData: Extraction,
   apiKey: string
@@ -137,6 +143,7 @@ export async function POST(request: Request) {
   if (!url) {
     console.log("[api/analyze] Missing URL, returning empty extraction");
     return Response.json({
+      product_name: "",
       extraction: {
         ingredients: [],
         detected_actives: [],
@@ -155,6 +162,7 @@ export async function POST(request: Request) {
     if (!response.ok) {
       console.log("[api/analyze] Non-OK response status:", response.status);
       return Response.json({
+        product_name: "",
         extraction: {
           ingredients: [],
           detected_actives: [],
@@ -169,6 +177,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.log("[api/analyze] Error fetching URL:", error);
     return Response.json({
+      product_name: "",
       extraction: {
         ingredients: [],
         detected_actives: [],
@@ -178,6 +187,9 @@ export async function POST(request: Request) {
       risk_assessment: null,
     });
   }
+
+  const productName = extractPageTitle(html);
+  console.log("[api/analyze] Product name from title:", productName);
 
   const visibleText = extractVisibleText(html);
   console.log("[api/analyze] Visible text length:", visibleText.length);
@@ -198,7 +210,7 @@ export async function POST(request: Request) {
     console.log(
       "[api/analyze] Skipping LLM call, apiKey or visibleText missing",
     );
-    return Response.json({ extraction, risk_assessment: null });
+    return Response.json({ product_name: productName, extraction, risk_assessment: null });
   }
 
   try {
@@ -254,7 +266,7 @@ ${visibleText}
         "body (truncated):",
         errorText.slice(0, 500),
       );
-      return Response.json({ extraction, risk_assessment: null });
+      return Response.json({ product_name: productName, extraction, risk_assessment: null });
     }
 
     const llmJson = await llmResponse.json();
@@ -305,6 +317,6 @@ ${visibleText}
     risk_assessment = await runRiskAssessment(extraction, apiKey);
   }
 
-  return Response.json({ extraction, risk_assessment });
+  return Response.json({ product_name: productName, extraction, risk_assessment });
 }
 

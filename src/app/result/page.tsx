@@ -3,9 +3,9 @@
 import { useResult } from "../result-context";
 
 export default function Result() {
-  const { extraction, riskAssessment } = useResult();
+  const { extraction, riskAssessment, productName: rawProductName } = useResult();
 
-  const productName = "Product name not available in current data";
+  const productName = rawProductName || "Product name not available";
   const detectedActives = extraction?.detected_actives ?? [];
   const assessmentDate = new Date().toLocaleDateString();
 

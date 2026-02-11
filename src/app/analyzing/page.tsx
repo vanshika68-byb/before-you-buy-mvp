@@ -17,6 +17,7 @@ export default function Analyzing() {
     setSubmittedUrl,
     setExtraction,
     setRiskAssessment,
+    setProductName,
   } = useResult();
 
   const [step1, setStep1] = useState<Step>("idle");
@@ -48,11 +49,14 @@ export default function Analyzing() {
 
         const json = (await response.json().catch(() => null)) as
           | {
+              product_name?: string;
               extraction?: Partial<Extraction>;
               risk_assessment?: Partial<RiskAssessment> | null;
             }
           | null;
 
+        const rawProductName =
+          typeof json?.product_name === "string" ? json.product_name : "";
         const raw = json?.extraction ?? null;
         const rawRisk = json?.risk_assessment ?? null;
 
@@ -99,6 +103,7 @@ export default function Analyzing() {
         if (cancelled) return;
         setStep3("done"); // Applying safety heuristics (parsed)
 
+        setProductName(rawProductName || null);
         setExtraction(safeExtraction);
         setRiskAssessment(safeRiskAssessment);
 

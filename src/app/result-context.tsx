@@ -29,6 +29,8 @@ type ResultContextValue = {
   setRiskAssessment: (value: RiskAssessment | null) => void;
   submittedUrl: string | null;
   setSubmittedUrl: (value: string | null) => void;
+  productName: string | null;
+  setProductName: (value: string | null) => void;
 };
 
 const ResultContext = createContext<ResultContextValue | undefined>(undefined);
@@ -39,6 +41,7 @@ export function ResultProvider({ children }: { children: ReactNode }) {
     null
   );
   const [submittedUrl, setSubmittedUrl] = useState<string | null>(null);
+  const [productName, setProductName] = useState<string | null>(null);
 
   return (
     <ResultContext.Provider
@@ -49,6 +52,8 @@ export function ResultProvider({ children }: { children: ReactNode }) {
         setRiskAssessment,
         submittedUrl,
         setSubmittedUrl,
+        productName,
+        setProductName,
       }}
     >
       {children}
