@@ -28,10 +28,87 @@ function extractVisibleText(html: string): string {
   return withoutTags.replace(/\s+/g, " ").trim();
 }
 
+/**
+ * Try og:title first (cleaner on e-commerce), then <title>.
+ * Returns "" if neither is found or the value looks like a
+ * generic/error page (e.g. "Site Maintenance").
+ */
 function extractPageTitle(html: string): string {
-  const match = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-  if (!match) return "";
-  return match[1].replace(/\s+/g, " ").trim();
+  // 1. og:title
+  const ogMatch = html.match(
+    /<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i,
+  );
+  if (!ogMatch) {
+    // Also try reversed attribute order (content before property)
+    const ogAlt = html.match(
+      /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']/i,
+    );
+    if (ogAlt) {
+      const val = ogAlt[1].replace(/\s+/g, " ").trim();
+      if (val && !looksGeneric(val)) return val;
+    }
+  } else {
+    const val = ogMatch[1].replace(/\s+/g, " ").trim();
+    if (val && !looksGeneric(val)) return val;
+  }
+
+  // 2. <title> tag
+  const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  if (titleMatch) {
+    const val = titleMatch[1].replace(/\s+/g, " ").trim();
+    if (val && !looksGeneric(val)) return val;
+  }
+
+  return "";
+}
+
+/** Detect generic / error page titles that should be discarded. */
+function looksGeneric(title: string): boolean {
+  const lower = title.toLowerCase();
+  const bad = [
+    "site maintenance",
+    "maintenance",
+    "404",
+    "page not found",
+    "access denied",
+    "just a moment",
+    "attention required",
+    "please wait",
+    "loading",
+  ];
+  return bad.some((b) => lower.includes(b));
+}
+
+/**
+ * Last-resort: derive a human-readable product name from the URL path.
+ * e.g. "https://www.nykaa.com/estee-lauder-advanced-night-repair/p/833283"
+ *   -> "Estee Lauder Advanced Night Repair"
+ */
+function productNameFromUrl(url: string): string {
+  try {
+    const pathname = new URL(url).pathname; // e.g. /estee-lauder-advanced-night-repair/p/833283
+    // Take the first meaningful path segment (skip empty, "p", numeric IDs, "dp", etc.)
+    const segments = pathname
+      .split("/")
+      .filter(
+        (s) =>
+          s &&
+          s !== "p" &&
+          s !== "dp" &&
+          !/^\d+$/.test(s) &&
+          s.length > 3,
+      );
+    if (segments.length === 0) return "";
+    // Pick the longest slug (most likely the product name)
+    const slug = segments.reduce((a, b) => (a.length >= b.length ? a : b));
+    // Convert slug to title case
+    return slug
+      .replace(/[-_]+/g, " ")
+      .replace(/\b\w/g, (c) => c.toUpperCase())
+      .trim();
+  } catch {
+    return "";
+  }
 }
 
 async function runRiskAssessment(
@@ -158,7 +235,15 @@ export async function POST(request: Request) {
 
   try {
     console.log("[api/analyze] Fetching URL", url);
-    const response = await fetch(url);
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        Accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+    });
     if (!response.ok) {
       console.log("[api/analyze] Non-OK response status:", response.status);
       return Response.json({
@@ -188,8 +273,10 @@ export async function POST(request: Request) {
     });
   }
 
-  const productName = extractPageTitle(html);
-  console.log("[api/analyze] Product name from title:", productName);
+  const htmlTitle = extractPageTitle(html);
+  const slugName = productNameFromUrl(url);
+  console.log("[api/analyze] Product name from HTML title:", htmlTitle);
+  console.log("[api/analyze] Product name from URL slug:", slugName);
 
   const visibleText = extractVisibleText(html);
   console.log("[api/analyze] Visible text length:", visibleText.length);
@@ -210,8 +297,10 @@ export async function POST(request: Request) {
     console.log(
       "[api/analyze] Skipping LLM call, apiKey or visibleText missing",
     );
-    return Response.json({ product_name: productName, extraction, risk_assessment: null });
+    return Response.json({ product_name: htmlTitle || slugName, extraction, risk_assessment: null });
   }
+
+  let llmProductName = "";
 
   try {
     const prompt = `
@@ -223,11 +312,17 @@ If specific information is missing or unclear, use the string "unknown".
 
 Return JSON in exactly this shape and nothing else:
 {
+  "product_name": "Full product name including brand, variant, and size if available",
   "ingredients": ["string"],
   "detected_actives": ["Retinoid", "Vitamin C", "Niacinamide"],
   "concentration_clues": "string or unknown",
   "usage_instructions": "string or unknown"
 }
+
+Rules for product_name:
+- Extract the full product name as shown on the page (brand + product line + variant + size).
+- Do NOT abbreviate or shorten.
+- If no product name is visible, return "unknown".
 
 Text:
 ${visibleText}
@@ -266,7 +361,7 @@ ${visibleText}
         "body (truncated):",
         errorText.slice(0, 500),
       );
-      return Response.json({ product_name: productName, extraction, risk_assessment: null });
+      return Response.json({ product_name: htmlTitle || slugName, extraction, risk_assessment: null });
     }
 
     const llmJson = await llmResponse.json();
@@ -284,8 +379,19 @@ ${visibleText}
         content.slice(0, 300),
       );
 
-      const parsed = JSON.parse(content) as Partial<Extraction>;
+      const parsed = JSON.parse(content) as Partial<Extraction> & { product_name?: string };
       console.log("[api/analyze] Parsed extraction:", parsed);
+
+      // Capture LLM-extracted product name
+      if (
+        typeof parsed.product_name === "string" &&
+        parsed.product_name !== "unknown" &&
+        parsed.product_name.trim()
+      ) {
+        llmProductName = parsed.product_name.trim();
+        console.log("[api/analyze] LLM-extracted product name:", llmProductName);
+      }
+
       extraction = {
         ingredients: Array.isArray(parsed.ingredients)
           ? parsed.ingredients.map((item) => String(item))
@@ -317,6 +423,10 @@ ${visibleText}
     risk_assessment = await runRiskAssessment(extraction, apiKey);
   }
 
-  return Response.json({ product_name: productName, extraction, risk_assessment });
+  // Priority: LLM-extracted name > HTML title/og:title > URL slug
+  const finalProductName = llmProductName || htmlTitle || slugName;
+  console.log("[api/analyze] Final product name:", finalProductName);
+
+  return Response.json({ product_name: finalProductName, extraction, risk_assessment });
 }
 
