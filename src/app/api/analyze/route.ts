@@ -2,6 +2,7 @@
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
 
+/** Frontend-compatible extraction type */
 type Extraction = {
   ingredients: string[];
   detected_actives: string[];
@@ -9,6 +10,7 @@ type Extraction = {
   usage_instructions: string;
 };
 
+/** Frontend-compatible risk assessment type */
 type RiskAssessment = {
   avoid_if: string[];
   risk_reasons: string[];
@@ -17,93 +19,102 @@ type RiskAssessment = {
   disclaimer: string;
 };
 
+/** LLM output schema */
+type AnalysisResponse = {
+  product_name?: string;
+  product_summary?: {
+    identified_key_ingredients?: string[];
+    notable_formulation_characteristics?: string[];
+  };
+  clinical_analysis?: {
+    potential_irritation_risks?: string[];
+    compatibility_considerations?: string[];
+    layering_conflicts_or_interactions?: string[];
+  };
+  formulation_strengths?: string[];
+  missing_or_unclear_information?: string[];
+  overall_assessment?: {
+    risk_level?: "low" | "moderate" | "elevated";
+    certainty_level?: "high" | "moderate" | "low";
+    clinical_reasoning_summary?: string;
+  };
+  professional_consideration?: string;
+  error?: string;
+};
+
 /* ------------------------------------------------------------------ */
-/*  Prompt constants                                                   */
+/*  Config                                                             */
 /* ------------------------------------------------------------------ */
 
-const EXTRACTION_SYSTEM_PROMPT =
-  "You are a deterministic clinical information extraction engine. " +
-  "You respond ONLY with valid JSON. No commentary, no markdown fences, no extra text.";
+const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
+const CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions";
 
-const EXTRACTION_USER_PROMPT = (visibleText: string) =>
-  `Your task is to extract ONLY explicit, verifiable formulation facts from the provided product page text.
+/* ------------------------------------------------------------------ */
+/*  Tool definition                                                    */
+/* ------------------------------------------------------------------ */
 
-STRICT RULES:
-- Do NOT infer.
-- Do NOT summarize.
-- Do NOT interpret marketing language.
-- Do NOT assume concentrations.
-- Do NOT guess active strength.
-- Ignore testimonials and reviews.
-- If information is not explicitly stated, return "unknown".
-- If uncertain, return "unknown".
+const TOOLS = [
+  {
+    type: "function" as const,
+    function: {
+      name: "fetch_url",
+      description: "Fetch visible text content from a webpage URL to analyze skincare product information",
+      parameters: {
+        type: "object",
+        properties: {
+          url: {
+            type: "string",
+            description: "The URL of the product page to fetch",
+          },
+        },
+        required: ["url"],
+      },
+    },
+  },
+];
 
-Return JSON ONLY in exactly this structure:
+/* ------------------------------------------------------------------ */
+/*  System prompt                                                      */
+/* ------------------------------------------------------------------ */
+
+const SYSTEM_PROMPT = `You are a dermatologist-level formulation analyst.
+
+Your task:
+1. First, use the fetch_url tool to retrieve the product page content.
+2. Then analyze the ingredients and formulation.
+3. Return your analysis as strict JSON only.
+
+You must:
+- Not recommend products.
+- Not speculate beyond visible information.
+- Explicitly model uncertainty.
+- Return valid JSON only in your final response.
+
+OUTPUT FORMAT (STRICT JSON):
 
 {
-  "product_name": "Full product name including brand, variant, and size if available",
-  "ingredients": ["string"],
-  "detected_actives": ["Retinoid", "Vitamin C", "Niacinamide"],
-  "concentration_clues": "string or unknown",
-  "usage_instructions": "string or unknown",
-  "formulation_disclosures": {
-    "ph_disclosed": "yes | no | unknown",
-    "strength_disclosed": "yes | no | unknown"
-  }
+  "product_name": "Full product name from page",
+  "product_summary": {
+    "identified_key_ingredients": ["string"],
+    "notable_formulation_characteristics": ["string"]
+  },
+  "clinical_analysis": {
+    "potential_irritation_risks": ["string"],
+    "compatibility_considerations": ["string"],
+    "layering_conflicts_or_interactions": ["string"]
+  },
+  "formulation_strengths": ["string"],
+  "missing_or_unclear_information": ["string"],
+  "overall_assessment": {
+    "risk_level": "low | moderate | elevated",
+    "certainty_level": "high | moderate | low",
+    "clinical_reasoning_summary": "string"
+  },
+  "professional_consideration": "string"
 }
 
-Important constraints:
-- detected_actives must ONLY include: Retinoid, Vitamin C, Niacinamide.
-- If none detected, return empty array.
-- Use exact ingredient spellings from text.
-- product_name: extract the full product name as shown on the page (brand + product line + variant + size). Do NOT abbreviate. If not visible, return "unknown".
-- If your output contains any text outside valid JSON, the system will reject it.
-
-Text:
-${visibleText}`;
-
-const RISK_SYSTEM_PROMPT =
-  "You are applying conservative dermatology safety heuristics to a skincare formulation. " +
-  "You respond ONLY with valid JSON. No commentary, no markdown fences, no extra text.";
-
-const RISK_USER_PROMPT = (extractionData: Extraction) =>
-  `Your role:
-- NOT to recommend products
-- NOT to optimize outcomes
-- NOT to personalize advice
-- ONLY to flag known irritation or mismatch risk patterns
-
-Apply these dermatology principles strictly:
-
-1. Retinoids increase epidermal turnover and commonly worsen irritation in inflamed or barrier-compromised skin.
-2. Retinoid tolerability is dose-dependent. Undisclosed strength lowers assessment certainty.
-3. Low-pH Vitamin C commonly causes stinging in sensitive or barrier-impaired skin.
-4. Vitamin C stability and irritation risk depend on formulation details often not disclosed.
-5. Niacinamide at higher concentrations may trigger flushing in reactive or rosacea-prone skin.
-6. Lack of concentration clarity reduces safety confidence.
-7. When formulation or strength details are missing, certainty must be downgraded.
-8. If insufficient data is available, explicitly state uncertainty rather than speculating.
-
-STRICT RULES:
-- Do NOT invent risks.
-- Do NOT add benefits.
-- Do NOT speculate beyond detected actives.
-- Do NOT reference AI.
-- Use clinical, restrained language.
-- If your output contains text outside valid JSON, it will be rejected.
-
-Return JSON ONLY in this exact structure:
-
-{
-  "use_caution_if": ["string"],
-  "clinical_rationale": ["string"],
-  "assessment_certainty": "high | moderate | low",
-  "certainty_reason": "string"
-}
-
-Base reasoning ONLY on this extracted data:
-
-${JSON.stringify(extractionData)}`;
+If the page cannot be retrieved or analyzed, return:
+{ "error": "Unable to retrieve product content." }`;
 
 /* ------------------------------------------------------------------ */
 /*  HTML helpers                                                       */
@@ -122,79 +133,38 @@ function extractVisibleText(html: string): string {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Product-name helpers (unchanged)                                   */
+/*  URL fetch (server-side tool execution)                             */
 /* ------------------------------------------------------------------ */
 
-/**
- * Try og:title first (cleaner on e-commerce), then <title>.
- * Returns "" if neither is found or the value looks like a
- * generic/error page (e.g. "Site Maintenance").
- */
-function extractPageTitle(html: string): string {
-  // 1. og:title
-  const ogMatch = html.match(
-    /<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i,
-  );
-  if (!ogMatch) {
-    const ogAlt = html.match(
-      /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']/i,
-    );
-    if (ogAlt) {
-      const val = ogAlt[1].replace(/\s+/g, " ").trim();
-      if (val && !looksGeneric(val)) return val;
-    }
-  } else {
-    const val = ogMatch[1].replace(/\s+/g, " ").trim();
-    if (val && !looksGeneric(val)) return val;
-  }
-
-  // 2. <title> tag
-  const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-  if (titleMatch) {
-    const val = titleMatch[1].replace(/\s+/g, " ").trim();
-    if (val && !looksGeneric(val)) return val;
-  }
-
-  return "";
-}
-
-function looksGeneric(title: string): boolean {
-  const lower = title.toLowerCase();
-  const bad = [
-    "site maintenance",
-    "maintenance",
-    "404",
-    "page not found",
-    "access denied",
-    "just a moment",
-    "attention required",
-    "please wait",
-    "loading",
-  ];
-  return bad.some((b) => lower.includes(b));
-}
-
-function productNameFromUrl(url: string): string {
+async function fetchUrlContent(url: string): Promise<string | null> {
   try {
-    const pathname = new URL(url).pathname;
-    const segments = pathname
-      .split("/")
-      .filter(
-        (s) =>
-          s &&
-          s !== "p" &&
-          s !== "dp" &&
-          !/^\d+$/.test(s) &&
-          s.length > 3,
-      );
-    if (segments.length === 0) return "";
-    const slug = segments.reduce((a, b) => (a.length >= b.length ? a : b));
-    return slug
-      .replace(/[-_]+/g, " ")
-      .replace(/\b\w/g, (c) => c.toUpperCase())
-      .trim();
-  } catch {
-    return "";
+    console.log("[fetch_url] Fetching:", url);
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        Accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+    });
+
+    if (!response.ok) {
+      console.log("[fetch_url] Non-OK response:", response.status);
+      return null;
+    }
+
+    const html = await response.text();
+    console.log("[fetch_url] HTML length:", html.length);
+
+    const visibleText = extractVisibleText(html);
+    console.log("[fetch_url] Visible text length:", visibleText.length);
+
+    // Truncate to avoid token limits
+    return visibleText.slice(0, 40000);
+  } catch (error) {
+    console.log("[fetch_url] Error:", error);
+    return null;
   }
 }
 
@@ -203,7 +173,6 @@ function productNameFromUrl(url: string): string {
 /* ------------------------------------------------------------------ */
 
 function safeParseJson(raw: string): Record<string, unknown> | null {
-  // Strip markdown code fences if the model wraps output
   let cleaned = raw.trim();
   if (cleaned.startsWith("```")) {
     cleaned = cleaned.replace(/^```(?:json)?\s*/, "").replace(/\s*```$/, "");
@@ -218,98 +187,192 @@ function safeParseJson(raw: string): Record<string, unknown> | null {
 }
 
 /* ------------------------------------------------------------------ */
-/*  LLM call helper                                                    */
+/*  Product name fallback from URL                                     */
 /* ------------------------------------------------------------------ */
 
-async function callLlm(
-  system: string,
-  user: string,
+function productNameFromUrl(url: string): string {
+  try {
+    const pathname = new URL(url).pathname;
+    const segments = pathname
+      .split("/")
+      .filter(
+        (s) =>
+          s && s !== "p" && s !== "dp" && !/^\d+$/.test(s) && s.length > 3,
+      );
+    if (segments.length === 0) return "";
+    const slug = segments.reduce((a, b) => (a.length >= b.length ? a : b));
+    return slug
+      .replace(/[-_]+/g, " ")
+      .replace(/\b\w/g, (c) => c.toUpperCase())
+      .trim();
+  } catch {
+    return "";
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Map LLM output → frontend schema                                   */
+/* ------------------------------------------------------------------ */
+
+function mapToFrontendSchema(
+  analysis: AnalysisResponse,
+  fallbackProductName: string,
+): {
+  product_name: string;
+  extraction: Extraction;
+  risk_assessment: RiskAssessment | null;
+} {
+  const productName =
+    (typeof analysis.product_name === "string" && analysis.product_name.trim()) ||
+    fallbackProductName;
+
+  const ingredients = Array.isArray(analysis.product_summary?.identified_key_ingredients)
+    ? analysis.product_summary.identified_key_ingredients.map(String)
+    : [];
+
+  const activeKeywords = [
+    "retinol", "retinal", "retinoid", "tretinoin", "adapalene",
+    "vitamin c", "ascorbic acid", "ascorbyl",
+    "niacinamide", "nicotinamide",
+    "salicylic acid", "bha",
+    "glycolic acid", "lactic acid", "aha",
+    "hyaluronic acid",
+    "benzoyl peroxide",
+    "azelaic acid",
+  ];
+  const detected_actives = ingredients.filter((ing) =>
+    activeKeywords.some((kw) => ing.toLowerCase().includes(kw)),
+  );
+
+  const missingInfo = Array.isArray(analysis.missing_or_unclear_information)
+    ? analysis.missing_or_unclear_information.join("; ")
+    : "unknown";
+
+  const characteristics = Array.isArray(
+    analysis.product_summary?.notable_formulation_characteristics,
+  )
+    ? analysis.product_summary.notable_formulation_characteristics.join("; ")
+    : "unknown";
+
+  const extraction: Extraction = {
+    ingredients,
+    detected_actives,
+    concentration_clues: missingInfo || "unknown",
+    usage_instructions: characteristics || "unknown",
+  };
+
+  const hasAnalysis = analysis.clinical_analysis || analysis.overall_assessment;
+  let risk_assessment: RiskAssessment | null = null;
+
+  if (hasAnalysis) {
+    const compatibility = Array.isArray(
+      analysis.clinical_analysis?.compatibility_considerations,
+    )
+      ? analysis.clinical_analysis.compatibility_considerations.map(String)
+      : [];
+
+    const irritationRisks = Array.isArray(
+      analysis.clinical_analysis?.potential_irritation_risks,
+    )
+      ? analysis.clinical_analysis.potential_irritation_risks.map(String)
+      : [];
+    const layeringConflicts = Array.isArray(
+      analysis.clinical_analysis?.layering_conflicts_or_interactions,
+    )
+      ? analysis.clinical_analysis.layering_conflicts_or_interactions.map(String)
+      : [];
+    const riskReasons = [...irritationRisks, ...layeringConflicts];
+
+    const certRaw = analysis.overall_assessment?.certainty_level;
+    let confidenceLevel: "low" | "medium" | "high" = "low";
+    if (certRaw === "high") confidenceLevel = "high";
+    else if (certRaw === "moderate") confidenceLevel = "medium";
+
+    const confidenceReason =
+      analysis.overall_assessment?.clinical_reasoning_summary ||
+      analysis.professional_consideration ||
+      "Assessment based on available formulation disclosures.";
+
+    risk_assessment = {
+      avoid_if: compatibility,
+      risk_reasons: riskReasons,
+      confidence_level: confidenceLevel,
+      confidence_reason: confidenceReason,
+      disclaimer:
+        "This is a general, dermatology-informed safety screen, not a diagnosis or treatment plan.",
+    };
+  }
+
+  return { product_name: productName, extraction, risk_assessment };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Chat message types                                                 */
+/* ------------------------------------------------------------------ */
+
+type ChatMessage = {
+  role: "system" | "user" | "assistant" | "tool";
+  content?: string | null;
+  tool_calls?: Array<{
+    id: string;
+    type: "function";
+    function: {
+      name: string;
+      arguments: string;
+    };
+  }>;
+  tool_call_id?: string;
+};
+
+/* ------------------------------------------------------------------ */
+/*  Chat Completions API call                                          */
+/* ------------------------------------------------------------------ */
+
+async function callChatCompletions(
   apiKey: string,
-): Promise<string | null> {
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+  messages: ChatMessage[],
+  includeTools: boolean,
+): Promise<{
+  message: ChatMessage | null;
+  finishReason: string | null;
+}> {
+  const body: Record<string, unknown> = {
+    model: OPENAI_MODEL,
+    messages,
+    temperature: 0.2,
+  };
+
+  if (includeTools) {
+    body.tools = TOOLS;
+    body.tool_choice = "auto";
+  }
+
+  const response = await fetch(CHAT_COMPLETIONS_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-      temperature: 0,
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {
-    const errorText = await response
-      .text()
-      .catch(() => "<failed to read error body>");
+    const errorText = await response.text().catch(() => "<failed>");
     console.log(
-      "[api/analyze] LLM response not OK:",
+      "[api/analyze] Chat API error:",
       response.status,
-      "body (truncated):",
       errorText.slice(0, 500),
     );
-    return null;
+    return { message: null, finishReason: null };
   }
 
   const json = await response.json();
-  const content = json?.choices?.[0]?.message?.content;
-  return typeof content === "string" ? content : null;
-}
+  const choice = json?.choices?.[0];
 
-/* ------------------------------------------------------------------ */
-/*  Risk assessment (second LLM call)                                  */
-/* ------------------------------------------------------------------ */
-
-async function runRiskAssessment(
-  extractedData: Extraction,
-  apiKey: string,
-): Promise<RiskAssessment | null> {
-  try {
-    const raw = await callLlm(
-      RISK_SYSTEM_PROMPT,
-      RISK_USER_PROMPT(extractedData),
-      apiKey,
-    );
-    if (!raw) return null;
-
-    const parsed = safeParseJson(raw);
-    if (!parsed) {
-      console.log("[api/analyze] Risk assessment: invalid JSON from LLM");
-      return null;
-    }
-
-    console.log("[api/analyze] Parsed risk assessment:", parsed);
-
-    // Map new prompt field names → existing frontend schema
-    const certaintyRaw = parsed.assessment_certainty;
-    let mappedLevel: "low" | "medium" | "high" = "low";
-    if (certaintyRaw === "high") mappedLevel = "high";
-    else if (certaintyRaw === "moderate") mappedLevel = "medium";
-    else if (certaintyRaw === "low") mappedLevel = "low";
-
-    return {
-      avoid_if: Array.isArray(parsed.use_caution_if)
-        ? (parsed.use_caution_if as unknown[]).map((s) => String(s))
-        : [],
-      risk_reasons: Array.isArray(parsed.clinical_rationale)
-        ? (parsed.clinical_rationale as unknown[]).map((s) => String(s))
-        : [],
-      confidence_level: mappedLevel,
-      confidence_reason:
-        typeof parsed.certainty_reason === "string"
-          ? parsed.certainty_reason
-          : "Insufficient formulation details to support a higher certainty classification.",
-      disclaimer:
-        "This is a general, dermatology-informed safety screen, not a diagnosis or treatment plan.",
-    };
-  } catch (err) {
-    console.log("[api/analyze] Risk assessment error:", err);
-    return null;
-  }
+  return {
+    message: choice?.message ?? null,
+    finishReason: choice?.finish_reason ?? null,
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -325,8 +388,10 @@ export async function POST(request: Request) {
   });
 
   const url =
-    body && typeof body === "object" && typeof (body as any).url === "string"
-      ? (body as any).url
+    body &&
+    typeof body === "object" &&
+    typeof (body as Record<string, unknown>).url === "string"
+      ? ((body as Record<string, unknown>).url as string)
       : "";
 
   console.log("[api/analyze] URL from body:", url);
@@ -343,157 +408,148 @@ export async function POST(request: Request) {
       risk_assessment: null,
     });
 
-  if (!url) {
-    console.log("[api/analyze] Missing URL, returning empty extraction");
-    return emptyResponse();
-  }
-
-  /* ---------- Fetch product page ---------------------------------- */
-
-  let html: string | null = null;
-
-  try {
-    console.log("[api/analyze] Fetching URL", url);
-    const response = await fetch(url, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        Accept:
-          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
+  const errorResponse = (message: string, name = "") =>
+    Response.json({
+      product_name: name,
+      extraction: {
+        ingredients: [],
+        detected_actives: [],
+        concentration_clues: "unknown",
+        usage_instructions: "unknown",
       },
+      risk_assessment: null,
+      error: message,
     });
-    if (!response.ok) {
-      console.log("[api/analyze] Non-OK response status:", response.status);
-      return emptyResponse();
-    }
-    html = await response.text();
-    console.log("[api/analyze] Fetched HTML length:", html.length);
-  } catch (error) {
-    console.log("[api/analyze] Error fetching URL:", error);
+
+  if (!url) {
+    console.log("[api/analyze] Missing URL");
     return emptyResponse();
   }
 
-  /* ---------- Product-name candidates (HTML + URL slug) ----------- */
-
-  const htmlTitle = extractPageTitle(html);
-  const slugName = productNameFromUrl(url);
-  console.log("[api/analyze] Product name from HTML title:", htmlTitle);
-  console.log("[api/analyze] Product name from URL slug:", slugName);
-
-  /* ---------- Visible text ---------------------------------------- */
-
-  const visibleText = extractVisibleText(html);
-  console.log("[api/analyze] Visible text length:", visibleText.length);
+  const fallbackName = productNameFromUrl(url);
 
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     console.log("[api/analyze] OPENAI_API_KEY is missing");
+    return errorResponse("API key not configured.", fallbackName);
   }
 
-  let extraction: Extraction = {
-    ingredients: [],
-    detected_actives: [],
-    concentration_clues: "unknown",
-    usage_instructions: "unknown",
-  };
+  /* ---------- Step 1: Initial request with tools ------------------- */
 
-  if (!apiKey || !visibleText) {
-    console.log(
-      "[api/analyze] Skipping LLM call, apiKey or visibleText missing",
-    );
-    return Response.json({
-      product_name: htmlTitle || slugName,
-      extraction,
-      risk_assessment: null,
-    });
+  console.log("[api/analyze] Step 1: Initial request");
+
+  const messages: ChatMessage[] = [
+    { role: "system", content: SYSTEM_PROMPT },
+    { role: "user", content: `Analyze this skincare product URL: ${url}` },
+  ];
+
+  let result = await callChatCompletions(apiKey, messages, true);
+
+  if (!result.message) {
+    console.log("[api/analyze] Initial request failed");
+    return errorResponse("Unable to process request.", fallbackName);
   }
 
-  /* ---------- LLM call 1: Extraction ------------------------------ */
+  /* ---------- Step 2: Handle tool calls loop ----------------------- */
 
-  let llmProductName = "";
+  let loopCount = 0;
+  const maxLoops = 3;
 
-  try {
-    const raw = await callLlm(
-      EXTRACTION_SYSTEM_PROMPT,
-      EXTRACTION_USER_PROMPT(visibleText),
-      apiKey,
-    );
+  while (result.finishReason === "tool_calls" && loopCount < maxLoops) {
+    loopCount++;
+    console.log("[api/analyze] Tool call loop:", loopCount);
 
-    if (!raw) {
-      console.log("[api/analyze] Extraction LLM returned nothing");
-      return Response.json({
-        product_name: htmlTitle || slugName,
-        extraction,
-        risk_assessment: null,
-      });
+    const toolCalls = result.message.tool_calls;
+    if (!toolCalls || toolCalls.length === 0) {
+      console.log("[api/analyze] No tool calls found");
+      break;
     }
 
-    const parsed = safeParseJson(raw);
+    // Add assistant message with tool calls
+    messages.push(result.message);
 
-    if (!parsed) {
-      console.log("[api/analyze] Extraction: invalid JSON from LLM");
-      return Response.json({
-        product_name: htmlTitle || slugName,
-        extraction,
-        risk_assessment: null,
-      });
+    // Execute each tool call
+    for (const toolCall of toolCalls) {
+      console.log("[api/analyze] Executing tool:", toolCall.function.name);
+
+      if (toolCall.function.name === "fetch_url") {
+        let targetUrl = url;
+        try {
+          const args = JSON.parse(toolCall.function.arguments);
+          if (typeof args.url === "string") {
+            targetUrl = args.url;
+          }
+        } catch {
+          // Use default URL
+        }
+
+        const content = await fetchUrlContent(targetUrl);
+
+        if (!content) {
+          console.log("[api/analyze] fetch_url failed");
+          // Return error content to model
+          messages.push({
+            role: "tool",
+            tool_call_id: toolCall.id,
+            content: "Error: Unable to retrieve page content. The URL may be blocked or unavailable.",
+          });
+        } else {
+          messages.push({
+            role: "tool",
+            tool_call_id: toolCall.id,
+            content: content,
+          });
+        }
+      } else {
+        // Unknown tool
+        messages.push({
+          role: "tool",
+          tool_call_id: toolCall.id,
+          content: "Error: Unknown tool.",
+        });
+      }
     }
 
-    console.log("[api/analyze] Parsed extraction keys:", Object.keys(parsed));
+    // Continue conversation
+    result = await callChatCompletions(apiKey, messages, true);
 
-    // Capture LLM-extracted product name
-    if (
-      typeof parsed.product_name === "string" &&
-      parsed.product_name !== "unknown" &&
-      parsed.product_name.trim()
-    ) {
-      llmProductName = (parsed.product_name as string).trim();
-      console.log("[api/analyze] LLM-extracted product name:", llmProductName);
+    if (!result.message) {
+      console.log("[api/analyze] Follow-up request failed");
+      return errorResponse("Unable to complete analysis.", fallbackName);
     }
-
-    extraction = {
-      ingredients: Array.isArray(parsed.ingredients)
-        ? (parsed.ingredients as unknown[]).map((item) => String(item))
-        : [],
-      detected_actives: Array.isArray(parsed.detected_actives)
-        ? (parsed.detected_actives as unknown[]).map((item) => String(item))
-        : [],
-      concentration_clues:
-        typeof parsed.concentration_clues === "string"
-          ? parsed.concentration_clues
-          : "unknown",
-      usage_instructions:
-        typeof parsed.usage_instructions === "string"
-          ? parsed.usage_instructions
-          : "unknown",
-    };
-  } catch (err) {
-    console.log("[api/analyze] Extraction error:", err);
-    // Fall back to default empty/unknown extraction
   }
 
-  /* ---------- LLM call 2: Risk assessment ------------------------- */
+  /* ---------- Step 3: Extract final response ----------------------- */
 
-  let risk_assessment: RiskAssessment | null = null;
-  if (
-    extraction.ingredients.length > 0 ||
-    extraction.detected_actives.length > 0 ||
-    extraction.concentration_clues !== "unknown" ||
-    extraction.usage_instructions !== "unknown"
-  ) {
-    risk_assessment = await runRiskAssessment(extraction, apiKey);
+  const finalContent = result.message.content;
+  console.log(
+    "[api/analyze] Final content (truncated):",
+    finalContent?.slice(0, 500),
+  );
+
+  if (!finalContent) {
+    console.log("[api/analyze] No final content");
+    return errorResponse("Invalid model response.", fallbackName);
   }
 
-  /* ---------- Final response -------------------------------------- */
+  const parsed = safeParseJson(finalContent) as AnalysisResponse | null;
 
-  // Priority: LLM-extracted name > HTML title/og:title > URL slug
-  const finalProductName = llmProductName || htmlTitle || slugName;
-  console.log("[api/analyze] Final product name:", finalProductName);
+  if (!parsed) {
+    console.log("[api/analyze] Failed to parse JSON");
+    return errorResponse("Invalid model response.", fallbackName);
+  }
 
-  return Response.json({
-    product_name: finalProductName,
-    extraction,
-    risk_assessment,
-  });
+  if (parsed.error) {
+    console.log("[api/analyze] Model returned error:", parsed.error);
+    return errorResponse(parsed.error, fallbackName);
+  }
+
+  console.log("[api/analyze] Parsed keys:", Object.keys(parsed));
+
+  /* ---------- Step 4: Map to frontend schema ----------------------- */
+
+  const mapped = mapToFrontendSchema(parsed, fallbackName);
+  console.log("[api/analyze] Final product name:", mapped.product_name);
+
+  return Response.json(mapped);
 }
