@@ -1,17 +1,43 @@
-/* ------------------------------------------------------------------ */
-/*  Types                                                              */
-/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------
+ * Types
+ * ------------------------------------------------------------------ */
 
-/** Frontend-compatible extraction type */
-type Extraction = {
-  ingredients: string[];
-  detected_actives: string[];
-  concentration_clues: string;
-  usage_instructions: string;
+export type ActiveIngredient = {
+  name: string;
+  function: string;
+  concentration_estimate?: string;
 };
 
-/** Frontend-compatible risk assessment type */
-type RiskAssessment = {
+export type IngredientInteraction = {
+  ingredients: string[];
+  interaction_type: "conflict" | "synergy" | "redundancy";
+  explanation: string;
+};
+
+export type SkinTypeSuitability = {
+  oily: "good" | "neutral" | "caution" | "avoid";
+  dry: "good" | "neutral" | "caution" | "avoid";
+  combination: "good" | "neutral" | "caution" | "avoid";
+  sensitive: "good" | "neutral" | "caution" | "avoid";
+  normal: "good" | "neutral" | "caution" | "avoid";
+  reasoning: string;
+};
+
+export type Verdict = {
+  signal: "green" | "yellow" | "red";
+  headline: string;
+  summary: string;
+};
+
+export type Extraction = {
+  ingredients: string[];
+  detected_actives: ActiveIngredient[];
+  concentration_clues: string;
+  usage_instructions: string;
+  ph_notes: string;
+};
+
+export type RiskAssessment = {
   avoid_if: string[];
   risk_reasons: string[];
   confidence_level: "low" | "medium" | "high";
@@ -19,46 +45,72 @@ type RiskAssessment = {
   disclaimer: string;
 };
 
-/** LLM output schema */
-type AnalysisResponse = {
+export type AnalysisResult = {
+  product_name: string;
+  product_type: string;
+  extraction: Extraction;
+  what_this_product_does: string[];
+  skin_type_suitability: SkinTypeSuitability | null;
+  ingredient_interactions: IngredientInteraction[];
+  formulation_strengths: string[];
+  formulation_weaknesses: string[];
+  risk_assessment: RiskAssessment | null;
+  verdict: Verdict | null;
+  error?: string;
+};
+
+type LLMIngredientEntry = {
+  name: string;
+  function?: string;
+  concentration_estimate?: string;
+};
+
+type LLMAnalysisResponse = {
   product_name?: string;
+  product_type?: string;
   product_summary?: {
-    identified_key_ingredients?: string[];
+    identified_key_ingredients?: LLMIngredientEntry[];
     notable_formulation_characteristics?: string[];
+    ph_or_vehicle_notes?: string;
   };
+  what_this_product_does?: string[];
+  skin_type_suitability?: SkinTypeSuitability;
   clinical_analysis?: {
     potential_irritation_risks?: string[];
     compatibility_considerations?: string[];
-    layering_conflicts_or_interactions?: string[];
+    layering_conflicts_or_interactions?: IngredientInteraction[];
   };
   formulation_strengths?: string[];
+  formulation_weaknesses?: string[];
   missing_or_unclear_information?: string[];
   overall_assessment?: {
     risk_level?: "low" | "moderate" | "elevated";
     certainty_level?: "high" | "moderate" | "low";
     clinical_reasoning_summary?: string;
+    verdict?: Verdict;
   };
   professional_consideration?: string;
   error?: string;
 };
 
-/* ------------------------------------------------------------------ */
-/*  Config                                                             */
-/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------
+ * Config
+ * ------------------------------------------------------------------ */
 
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 const CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions";
 
-/* ------------------------------------------------------------------ */
-/*  Tool definition                                                    */
-/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------
+ * Tools
+ * ------------------------------------------------------------------ */
 
 const TOOLS = [
   {
     type: "function" as const,
     function: {
       name: "fetch_url",
-      description: "Fetch visible text content from a webpage URL to analyze skincare product information",
+      description:
+        "Fetch visible text content from a webpage URL to analyze skincare product information",
       parameters: {
         type: "object",
         properties: {
@@ -73,52 +125,103 @@ const TOOLS = [
   },
 ];
 
-/* ------------------------------------------------------------------ */
-/*  System prompt                                                      */
-/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------
+ * System prompt
+ * ------------------------------------------------------------------ */
 
-const SYSTEM_PROMPT = `You are a dermatologist-level formulation analyst.
+const SYSTEM_PROMPT = `You are a board-certified dermatologist and cosmetic chemist with deep expertise in formulation science.
 
 Your task:
-1. First, use the fetch_url tool to retrieve the product page content.
-2. Then analyze the ingredients and formulation.
-3. Return your analysis as strict JSON only.
+1. Use the fetch_url tool to retrieve the product page content.
+2. Reason carefully through the formulation before producing output.
+3. Return ONLY valid JSON — no prose, no markdown fences.
 
-You must:
-- Not recommend products.
-- Not speculate beyond visible information.
-- Explicitly model uncertainty.
-- Return valid JSON only in your final response.
+## Analysis Standards
 
-OUTPUT FORMAT (STRICT JSON):
+**Ingredient Analysis**
+- Identify ALL active and functional ingredients from the INCI list
+- Estimate concentrations using: position in ingredient list (earlier = higher), regulatory caps, and known effective ranges
+- Note pH-sensitive ingredients (vitamin C works best <3.5, AHAs active at <4, retinoids denature in alkaline environments)
+- Classify ingredients: humectants, emollients, occlusives, emulsifiers, film-formers, actives
+
+**Clinical Reasoning**
+- Flag real irritation risks — distinguish confirmed irritants (fragrance, alcohol denat.) from commonly misattributed ones (phenoxyethanol, citric acid as pH adjuster)
+- Identify meaningful interactions: AHA + retinol (pH mismatch), niacinamide + vitamin C (stability at high %), benzoyl peroxide + retinol (oxidation)
+- Note redundancies (e.g., two humectants doing identical work)
+- Consider Fitzpatrick scale sensitivity differences for sensitive skin ratings
+
+**Verdict Signal Rules**
+- "green": well-formulated, low irritation risk, broadly suitable
+- "yellow": effective but requires care — high actives, skin-type specific, or routine conflicts
+- "red": meaningful formulation concern, high irritation risk, or problematic ingredients
+
+**Certainty Rules**
+- "high": full INCI list visible on page
+- "moderate": partial list or marketing page with limited ingredient disclosure
+- "low": no ingredient list found; relying on claims only
+
+## Hard Rules
+- Never recommend buying or avoiding a product — analyze the formulation only
+- Clearly flag inferred vs confirmed information
+- Plain English in what_this_product_does — not raw INCI names alone
+- Return ONLY valid JSON in your final response
+
+## Output Format (STRICT JSON):
 
 {
   "product_name": "Full product name from page",
+  "product_type": "serum | moisturizer | toner | cleanser | treatment | mask | eye cream | sunscreen | other",
   "product_summary": {
-    "identified_key_ingredients": ["string"],
-    "notable_formulation_characteristics": ["string"]
+    "identified_key_ingredients": [
+      { "name": "Ingredient Name", "function": "what it does", "concentration_estimate": "~2% estimated from mid-list position" }
+    ],
+    "notable_formulation_characteristics": ["string"],
+    "ph_or_vehicle_notes": "inferred pH range or vehicle type"
+  },
+  "what_this_product_does": [
+    "Plain English description of primary benefit",
+    "Secondary benefit"
+  ],
+  "skin_type_suitability": {
+    "oily": "good | neutral | caution | avoid",
+    "dry": "good | neutral | caution | avoid",
+    "combination": "good | neutral | caution | avoid",
+    "sensitive": "good | neutral | caution | avoid",
+    "normal": "good | neutral | caution | avoid",
+    "reasoning": "1-2 sentence explanation of the ratings"
   },
   "clinical_analysis": {
     "potential_irritation_risks": ["string"],
-    "compatibility_considerations": ["string"],
-    "layering_conflicts_or_interactions": ["string"]
+    "compatibility_considerations": ["string — skin types or conditions to note"],
+    "layering_conflicts_or_interactions": [
+      {
+        "ingredients": ["ingredient A", "ingredient B"],
+        "interaction_type": "conflict | synergy | redundancy",
+        "explanation": "plain English explanation"
+      }
+    ]
   },
   "formulation_strengths": ["string"],
+  "formulation_weaknesses": ["string"],
   "missing_or_unclear_information": ["string"],
   "overall_assessment": {
     "risk_level": "low | moderate | elevated",
     "certainty_level": "high | moderate | low",
-    "clinical_reasoning_summary": "string"
+    "clinical_reasoning_summary": "2-3 sentences summarizing the key formulation story",
+    "verdict": {
+      "signal": "green | yellow | red",
+      "headline": "Max 7 words — punchy clinical verdict",
+      "summary": "2-3 plain-English sentences explaining the verdict for a non-expert"
+    }
   },
-  "professional_consideration": "string"
+  "professional_consideration": "One sentence about who should consult a professional before using this"
 }
 
-If the page cannot be retrieved or analyzed, return:
-{ "error": "Unable to retrieve product content." }`;
+If the page cannot be retrieved, return: { "error": "Unable to retrieve product content." }`;
 
-/* ------------------------------------------------------------------ */
-/*  HTML helpers                                                       */
-/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------
+ * HTML helpers
+ * ------------------------------------------------------------------ */
 
 function stripScriptsAndStyles(html: string): string {
   let cleaned = html.replace(/<script[\s\S]*?<\/script>/gi, "");
@@ -132,9 +235,41 @@ function extractVisibleText(html: string): string {
   return withoutTags.replace(/\s+/g, " ").trim();
 }
 
-/* ------------------------------------------------------------------ */
-/*  URL fetch (server-side tool execution)                             */
-/* ------------------------------------------------------------------ */
+function focusOnIngredients(text: string): string {
+  const lower = text.toLowerCase();
+  const ingredientMarkers = [
+    "ingredients:",
+    "full ingredients:",
+    "ingredient list:",
+    "inci list:",
+    "formulation:",
+    "what's in it:",
+    "active ingredients:",
+    "contains:",
+  ];
+
+  let ingredientStart = -1;
+  for (const marker of ingredientMarkers) {
+    const idx = lower.indexOf(marker);
+    if (idx !== -1 && (ingredientStart === -1 || idx < ingredientStart)) {
+      ingredientStart = idx;
+    }
+  }
+
+  if (ingredientStart !== -1) {
+    const contextStart = Math.max(0, ingredientStart - 500);
+    const contextEnd = Math.min(text.length, ingredientStart + 8000);
+    const ingredientSection = text.slice(contextStart, contextEnd);
+    const intro = text.slice(0, 3000);
+    return `${intro}\n\n--- INGREDIENT SECTION ---\n${ingredientSection}`.slice(0, 40000);
+  }
+
+  return text.slice(0, 40000);
+}
+
+/* ------------------------------------------------------------------
+ * URL fetch
+ * ------------------------------------------------------------------ */
 
 async function fetchUrlContent(url: string): Promise<string | null> {
   try {
@@ -143,8 +278,7 @@ async function fetchUrlContent(url: string): Promise<string | null> {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        Accept:
-          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
       },
     });
@@ -155,28 +289,26 @@ async function fetchUrlContent(url: string): Promise<string | null> {
     }
 
     const html = await response.text();
-    console.log("[fetch_url] HTML length:", html.length);
-
     const visibleText = extractVisibleText(html);
-    console.log("[fetch_url] Visible text length:", visibleText.length);
-
-    // Truncate to avoid token limits
-    return visibleText.slice(0, 40000);
+    return focusOnIngredients(visibleText);
   } catch (error) {
     console.log("[fetch_url] Error:", error);
     return null;
   }
 }
 
-/* ------------------------------------------------------------------ */
-/*  Safe JSON parser                                                   */
-/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------
+ * Safe JSON parser
+ * ------------------------------------------------------------------ */
 
 function safeParseJson(raw: string): Record<string, unknown> | null {
   let cleaned = raw.trim();
   if (cleaned.startsWith("```")) {
     cleaned = cleaned.replace(/^```(?:json)?\s*/, "").replace(/\s*```$/, "");
   }
+  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+  if (jsonMatch) cleaned = jsonMatch[0];
+
   try {
     const obj = JSON.parse(cleaned);
     if (obj && typeof obj === "object" && !Array.isArray(obj)) return obj;
@@ -186,19 +318,16 @@ function safeParseJson(raw: string): Record<string, unknown> | null {
   }
 }
 
-/* ------------------------------------------------------------------ */
-/*  Product name fallback from URL                                     */
-/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------
+ * Product name fallback from URL
+ * ------------------------------------------------------------------ */
 
 function productNameFromUrl(url: string): string {
   try {
     const pathname = new URL(url).pathname;
     const segments = pathname
       .split("/")
-      .filter(
-        (s) =>
-          s && s !== "p" && s !== "dp" && !/^\d+$/.test(s) && s.length > 3,
-      );
+      .filter((s) => s && s !== "p" && s !== "dp" && !/^\d+$/.test(s) && s.length > 3);
     if (segments.length === 0) return "";
     const slug = segments.reduce((a, b) => (a.length >= b.length ? a : b));
     return slug
@@ -210,105 +339,170 @@ function productNameFromUrl(url: string): string {
   }
 }
 
-/* ------------------------------------------------------------------ */
-/*  Map LLM output → frontend schema                                   */
-/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------
+ * Active ingredient keyword registry
+ * ------------------------------------------------------------------ */
+
+const ACTIVE_KEYWORDS: { kw: string; function: string }[] = [
+  { kw: "retinol", function: "Cell turnover & anti-aging" },
+  { kw: "retinal", function: "Cell turnover & anti-aging (faster acting than retinol)" },
+  { kw: "tretinoin", function: "Prescription retinoid for acne & anti-aging" },
+  { kw: "adapalene", function: "Retinoid for acne treatment" },
+  { kw: "bakuchiol", function: "Plant-based retinol alternative" },
+  { kw: "ascorbic acid", function: "Vitamin C — brightening & antioxidant" },
+  { kw: "ascorbyl glucoside", function: "Stable Vitamin C derivative — brightening" },
+  { kw: "sodium ascorbyl phosphate", function: "Stable Vitamin C derivative" },
+  { kw: "ascorbyl tetraisopalmitate", function: "Oil-soluble Vitamin C" },
+  { kw: "ethyl ascorbic acid", function: "Stable Vitamin C derivative" },
+  { kw: "magnesium ascorbyl phosphate", function: "Stable Vitamin C derivative" },
+  { kw: "salicylic acid", function: "BHA exfoliant — unclogs pores, anti-acne" },
+  { kw: "glycolic acid", function: "AHA exfoliant — brightening & resurfacing" },
+  { kw: "lactic acid", function: "AHA exfoliant — gentler than glycolic" },
+  { kw: "mandelic acid", function: "AHA exfoliant — sensitive skin-friendly" },
+  { kw: "gluconolactone", function: "PHA exfoliant — very gentle, humectant properties" },
+  { kw: "niacinamide", function: "Pore-minimizing, oil control & brightening" },
+  { kw: "nicotinamide", function: "Pore-minimizing & oil control" },
+  { kw: "hyaluronic acid", function: "Humectant — deep hydration" },
+  { kw: "sodium hyaluronate", function: "Humectant — smaller HA molecule, deeper penetration" },
+  { kw: "polyglutamic acid", function: "Humectant — holds more water than HA" },
+  { kw: "benzoyl peroxide", function: "Antibacterial — acne treatment" },
+  { kw: "azelaic acid", function: "Anti-acne, anti-redness & hyperpigmentation" },
+  { kw: "tranexamic acid", function: "Brightening — reduces hyperpigmentation" },
+  { kw: "alpha-arbutin", function: "Brightening — gentle melanin inhibitor" },
+  { kw: "kojic acid", function: "Brightening — melanin inhibitor" },
+  { kw: "ceramide", function: "Barrier repair & moisture retention" },
+  { kw: "peptide", function: "Collagen stimulation & anti-aging" },
+  { kw: "matrixyl", function: "Peptide complex — anti-aging" },
+  { kw: "copper peptide", function: "Wound healing & anti-aging" },
+  { kw: "zinc oxide", function: "Mineral UV filter — sensitive skin-safe" },
+  { kw: "titanium dioxide", function: "Mineral UV filter" },
+  { kw: "squalane", function: "Lightweight emollient — barrier support" },
+];
+
+/* ------------------------------------------------------------------
+ * Map LLM output → frontend schema
+ * ------------------------------------------------------------------ */
 
 function mapToFrontendSchema(
-  analysis: AnalysisResponse,
-  fallbackProductName: string,
-): {
-  product_name: string;
-  extraction: Extraction;
-  risk_assessment: RiskAssessment | null;
-} {
+  analysis: LLMAnalysisResponse,
+  fallbackProductName: string
+): AnalysisResult {
   const productName =
     (typeof analysis.product_name === "string" && analysis.product_name.trim()) ||
     fallbackProductName;
 
-  const ingredients = Array.isArray(analysis.product_summary?.identified_key_ingredients)
-    ? analysis.product_summary.identified_key_ingredients.map(String)
+  const productType =
+    typeof analysis.product_type === "string" ? analysis.product_type : "unknown";
+
+  const rawIngredients = Array.isArray(analysis.product_summary?.identified_key_ingredients)
+    ? analysis.product_summary!.identified_key_ingredients
     : [];
 
-  const activeKeywords = [
-    "retinol", "retinal", "retinoid", "tretinoin", "adapalene",
-    "vitamin c", "ascorbic acid", "ascorbyl",
-    "niacinamide", "nicotinamide",
-    "salicylic acid", "bha",
-    "glycolic acid", "lactic acid", "aha",
-    "hyaluronic acid",
-    "benzoyl peroxide",
-    "azelaic acid",
-  ];
-  const detected_actives = ingredients.filter((ing) =>
-    activeKeywords.some((kw) => ing.toLowerCase().includes(kw)),
+  const ingredients: string[] = rawIngredients.map((ing) =>
+    typeof ing === "string" ? ing : ing.name || ""
   );
 
-  const missingInfo = Array.isArray(analysis.missing_or_unclear_information)
-    ? analysis.missing_or_unclear_information.join("; ")
-    : "unknown";
-
-  const characteristics = Array.isArray(
-    analysis.product_summary?.notable_formulation_characteristics,
-  )
-    ? analysis.product_summary.notable_formulation_characteristics.join("; ")
-    : "unknown";
+  const detected_actives: ActiveIngredient[] = ingredients
+    .map((name) => {
+      const lower = name.toLowerCase();
+      const match = ACTIVE_KEYWORDS.find((k) => lower.includes(k.kw));
+      if (!match) return null;
+      const llmEntry = rawIngredients.find(
+        (ing) => typeof ing !== "string" && ing.name === name
+      );
+      const concentration_estimate =
+        typeof llmEntry !== "string" ? llmEntry?.concentration_estimate : undefined;
+      return { name, function: match.function, ...(concentration_estimate ? { concentration_estimate } : {}) };
+    })
+    .filter((a): a is ActiveIngredient => a !== null);
 
   const extraction: Extraction = {
     ingredients,
     detected_actives,
-    concentration_clues: missingInfo || "unknown",
-    usage_instructions: characteristics || "unknown",
+    concentration_clues: Array.isArray(analysis.missing_or_unclear_information)
+      ? analysis.missing_or_unclear_information.join("; ")
+      : "unknown",
+    usage_instructions: Array.isArray(analysis.product_summary?.notable_formulation_characteristics)
+      ? analysis.product_summary!.notable_formulation_characteristics.join("; ")
+      : "unknown",
+    ph_notes: analysis.product_summary?.ph_or_vehicle_notes ?? "unknown",
   };
 
-  const hasAnalysis = analysis.clinical_analysis || analysis.overall_assessment;
+  const skin_type_suitability: SkinTypeSuitability | null =
+    analysis.skin_type_suitability ?? null;
+
+  const interactionsRaw = analysis.clinical_analysis?.layering_conflicts_or_interactions ?? [];
+  const ingredient_interactions: IngredientInteraction[] = Array.isArray(interactionsRaw)
+    ? interactionsRaw.map((i) => ({
+        ingredients: Array.isArray(i.ingredients) ? i.ingredients.map(String) : [],
+        interaction_type: i.interaction_type || "conflict",
+        explanation: i.explanation || "",
+      }))
+    : [];
+
+  const what_this_product_does = Array.isArray(analysis.what_this_product_does)
+    ? analysis.what_this_product_does.map(String)
+    : [];
+
+  const formulation_strengths = Array.isArray(analysis.formulation_strengths)
+    ? analysis.formulation_strengths.map(String)
+    : [];
+
+  const formulation_weaknesses = Array.isArray(analysis.formulation_weaknesses)
+    ? analysis.formulation_weaknesses.map(String)
+    : [];
+
   let risk_assessment: RiskAssessment | null = null;
-
-  if (hasAnalysis) {
-    const compatibility = Array.isArray(
-      analysis.clinical_analysis?.compatibility_considerations,
-    )
-      ? analysis.clinical_analysis.compatibility_considerations.map(String)
+  if (analysis.clinical_analysis || analysis.overall_assessment) {
+    const compatibility = Array.isArray(analysis.clinical_analysis?.compatibility_considerations)
+      ? analysis.clinical_analysis!.compatibility_considerations.map(String)
       : [];
-
-    const irritationRisks = Array.isArray(
-      analysis.clinical_analysis?.potential_irritation_risks,
-    )
-      ? analysis.clinical_analysis.potential_irritation_risks.map(String)
+    const irritationRisks = Array.isArray(analysis.clinical_analysis?.potential_irritation_risks)
+      ? analysis.clinical_analysis!.potential_irritation_risks.map(String)
       : [];
-    const layeringConflicts = Array.isArray(
-      analysis.clinical_analysis?.layering_conflicts_or_interactions,
-    )
-      ? analysis.clinical_analysis.layering_conflicts_or_interactions.map(String)
-      : [];
-    const riskReasons = [...irritationRisks, ...layeringConflicts];
-
+    const riskReasons = [
+      ...irritationRisks,
+      ...ingredient_interactions
+        .filter((i) => i.interaction_type === "conflict")
+        .map((i) => i.explanation),
+    ];
     const certRaw = analysis.overall_assessment?.certainty_level;
     let confidenceLevel: "low" | "medium" | "high" = "low";
     if (certRaw === "high") confidenceLevel = "high";
     else if (certRaw === "moderate") confidenceLevel = "medium";
 
-    const confidenceReason =
-      analysis.overall_assessment?.clinical_reasoning_summary ||
-      analysis.professional_consideration ||
-      "Assessment based on available formulation disclosures.";
-
     risk_assessment = {
       avoid_if: compatibility,
       risk_reasons: riskReasons,
       confidence_level: confidenceLevel,
-      confidence_reason: confidenceReason,
+      confidence_reason:
+        analysis.overall_assessment?.clinical_reasoning_summary ||
+        analysis.professional_consideration ||
+        "Assessment based on available formulation disclosures.",
       disclaimer:
         "This is a general, dermatology-informed safety screen, not a diagnosis or treatment plan.",
     };
   }
 
-  return { product_name: productName, extraction, risk_assessment };
+  const verdict: Verdict | null = analysis.overall_assessment?.verdict ?? null;
+
+  return {
+    product_name: productName,
+    product_type: productType,
+    extraction,
+    what_this_product_does,
+    skin_type_suitability,
+    ingredient_interactions,
+    formulation_strengths,
+    formulation_weaknesses,
+    risk_assessment,
+    verdict,
+  };
 }
 
-/* ------------------------------------------------------------------ */
-/*  Chat message types                                                 */
-/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------
+ * Chat message types
+ * ------------------------------------------------------------------ */
 
 type ChatMessage = {
   role: "system" | "user" | "assistant" | "tool";
@@ -316,30 +510,24 @@ type ChatMessage = {
   tool_calls?: Array<{
     id: string;
     type: "function";
-    function: {
-      name: string;
-      arguments: string;
-    };
+    function: { name: string; arguments: string };
   }>;
   tool_call_id?: string;
 };
 
-/* ------------------------------------------------------------------ */
-/*  Chat Completions API call                                          */
-/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------
+ * Chat Completions API call
+ * ------------------------------------------------------------------ */
 
 async function callChatCompletions(
   apiKey: string,
   messages: ChatMessage[],
-  includeTools: boolean,
-): Promise<{
-  message: ChatMessage | null;
-  finishReason: string | null;
-}> {
+  includeTools: boolean
+): Promise<{ message: ChatMessage | null; finishReason: string | null }> {
   const body: Record<string, unknown> = {
     model: OPENAI_MODEL,
     messages,
-    temperature: 0.2,
+    temperature: 0.1,
   };
 
   if (includeTools) {
@@ -357,12 +545,8 @@ async function callChatCompletions(
   });
 
   if (!response.ok) {
-    const errorText = await response.text().catch(() => "<failed>");
-    console.log(
-      "[api/analyze] Chat API error:",
-      response.status,
-      errorText.slice(0, 500),
-    );
+    const errorText = await response.text().catch(() => "");
+    console.log("[api/analyze] Chat API error:", response.status, errorText.slice(0, 500));
     return { message: null, finishReason: null };
   }
 
@@ -375,181 +559,113 @@ async function callChatCompletions(
   };
 }
 
-/* ------------------------------------------------------------------ */
-/*  POST handler                                                       */
-/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------
+ * POST handler
+ * ------------------------------------------------------------------ */
 
 export async function POST(request: Request) {
   console.log("[api/analyze] Incoming request");
 
-  const body = await request.json().catch((error) => {
-    console.log("[api/analyze] Failed to parse JSON body", error);
-    return null;
-  });
-
+  const body = await request.json().catch(() => null);
   const url =
-    body &&
-    typeof body === "object" &&
-    typeof (body as Record<string, unknown>).url === "string"
+    body && typeof body === "object" && typeof (body as Record<string, unknown>).url === "string"
       ? ((body as Record<string, unknown>).url as string)
       : "";
 
-  console.log("[api/analyze] URL from body:", url);
+  const empty = (name = ""): AnalysisResult => ({
+    product_name: name,
+    product_type: "unknown",
+    extraction: {
+      ingredients: [],
+      detected_actives: [],
+      concentration_clues: "unknown",
+      usage_instructions: "unknown",
+      ph_notes: "unknown",
+    },
+    what_this_product_does: [],
+    skin_type_suitability: null,
+    ingredient_interactions: [],
+    formulation_strengths: [],
+    formulation_weaknesses: [],
+    risk_assessment: null,
+    verdict: null,
+  });
 
-  const emptyResponse = (name = "") =>
-    Response.json({
-      product_name: name,
-      extraction: {
-        ingredients: [],
-        detected_actives: [],
-        concentration_clues: "unknown",
-        usage_instructions: "unknown",
-      },
-      risk_assessment: null,
-    });
-
-  const errorResponse = (message: string, name = "") =>
-    Response.json({
-      product_name: name,
-      extraction: {
-        ingredients: [],
-        detected_actives: [],
-        concentration_clues: "unknown",
-        usage_instructions: "unknown",
-      },
-      risk_assessment: null,
-      error: message,
-    });
-
-  if (!url) {
-    console.log("[api/analyze] Missing URL");
-    return emptyResponse();
-  }
+  if (!url) return Response.json(empty());
 
   const fallbackName = productNameFromUrl(url);
-
   const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    console.log("[api/analyze] OPENAI_API_KEY is missing");
-    return errorResponse("API key not configured.", fallbackName);
-  }
-
-  /* ---------- Step 1: Initial request with tools ------------------- */
-
-  console.log("[api/analyze] Step 1: Initial request");
+  if (!apiKey) return Response.json({ ...empty(fallbackName), error: "API key not configured." });
 
   const messages: ChatMessage[] = [
     { role: "system", content: SYSTEM_PROMPT },
-    { role: "user", content: `Analyze this skincare product URL: ${url}` },
+    {
+      role: "user",
+      content: `Analyze this skincare product: ${url}
+
+Before your JSON output, briefly think through:
+1. What type of product is this?
+2. What are the key actives and their likely concentrations?
+3. What is the probable formulation pH?
+4. Any notable ingredient interactions or conflicts?
+
+Then output the strict JSON.`,
+    },
   ];
 
   let result = await callChatCompletions(apiKey, messages, true);
-
   if (!result.message) {
-    console.log("[api/analyze] Initial request failed");
-    return errorResponse("Unable to process request.", fallbackName);
+    return Response.json({ ...empty(fallbackName), error: "Unable to process request." });
   }
-
-  /* ---------- Step 2: Handle tool calls loop ----------------------- */
 
   let loopCount = 0;
   const maxLoops = 3;
 
   while (result.finishReason === "tool_calls" && loopCount < maxLoops) {
     loopCount++;
-    console.log("[api/analyze] Tool call loop:", loopCount);
-
     const toolCalls = result.message.tool_calls;
-    if (!toolCalls || toolCalls.length === 0) {
-      console.log("[api/analyze] No tool calls found");
-      break;
-    }
+    if (!toolCalls?.length) break;
 
-    // Add assistant message with tool calls
     messages.push(result.message);
 
-    // Execute each tool call
     for (const toolCall of toolCalls) {
-      console.log("[api/analyze] Executing tool:", toolCall.function.name);
-
       if (toolCall.function.name === "fetch_url") {
         let targetUrl = url;
         try {
           const args = JSON.parse(toolCall.function.arguments);
-          if (typeof args.url === "string") {
-            targetUrl = args.url;
-          }
-        } catch {
-          // Use default URL
-        }
+          if (typeof args.url === "string") targetUrl = args.url;
+        } catch { /* use default */ }
 
         const content = await fetchUrlContent(targetUrl);
-
-        if (!content) {
-          console.log("[api/analyze] fetch_url failed");
-          // Return error content to model
-          messages.push({
-            role: "tool",
-            tool_call_id: toolCall.id,
-            content: "Error: Unable to retrieve page content. The URL may be blocked or unavailable.",
-          });
-        } else {
-          messages.push({
-            role: "tool",
-            tool_call_id: toolCall.id,
-            content: content,
-          });
-        }
-      } else {
-        // Unknown tool
         messages.push({
           role: "tool",
           tool_call_id: toolCall.id,
-          content: "Error: Unknown tool.",
+          content:
+            content ??
+            "Error: Unable to retrieve page content. Analyze based on your training knowledge, and set certainty_level to 'low'.",
         });
+      } else {
+        messages.push({ role: "tool", tool_call_id: toolCall.id, content: "Error: Unknown tool." });
       }
     }
 
-    // Continue conversation
     result = await callChatCompletions(apiKey, messages, true);
-
     if (!result.message) {
-      console.log("[api/analyze] Follow-up request failed");
-      return errorResponse("Unable to complete analysis.", fallbackName);
+      return Response.json({ ...empty(fallbackName), error: "Unable to complete analysis." });
     }
   }
 
-  /* ---------- Step 3: Extract final response ----------------------- */
-
   const finalContent = result.message.content;
-  console.log(
-    "[api/analyze] Final content (truncated):",
-    finalContent?.slice(0, 500),
-  );
-
   if (!finalContent) {
-    console.log("[api/analyze] No final content");
-    return errorResponse("Invalid model response.", fallbackName);
+    return Response.json({ ...empty(fallbackName), error: "Invalid model response." });
   }
 
-  const parsed = safeParseJson(finalContent) as AnalysisResponse | null;
-
-  if (!parsed) {
-    console.log("[api/analyze] Failed to parse JSON");
-    return errorResponse("Invalid model response.", fallbackName);
-  }
-
-  if (parsed.error) {
-    console.log("[api/analyze] Model returned error:", parsed.error);
-    return errorResponse(parsed.error, fallbackName);
-  }
-
-  console.log("[api/analyze] Parsed keys:", Object.keys(parsed));
-
-  /* ---------- Step 4: Map to frontend schema ----------------------- */
+  const parsed = safeParseJson(finalContent) as LLMAnalysisResponse | null;
+  if (!parsed) return Response.json({ ...empty(fallbackName), error: "Invalid model response." });
+  if (parsed.error) return Response.json({ ...empty(fallbackName), error: parsed.error });
 
   const mapped = mapToFrontendSchema(parsed, fallbackName);
-  console.log("[api/analyze] Final product name:", mapped.product_name);
+  console.log("[api/analyze] Done. Verdict:", mapped.verdict?.signal);
 
   return Response.json(mapped);
 }

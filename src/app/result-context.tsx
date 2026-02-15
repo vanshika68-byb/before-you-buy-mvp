@@ -1,17 +1,40 @@
 "use client";
 
-import {
-  createContext,
-  useContext,
-  useState,
-  type ReactNode,
-} from "react";
+import { createContext, useContext, useState, type ReactNode } from "react";
+
+export type ActiveIngredient = {
+  name: string;
+  function: string;
+  concentration_estimate?: string;
+};
+
+export type IngredientInteraction = {
+  ingredients: string[];
+  interaction_type: "conflict" | "synergy" | "redundancy";
+  explanation: string;
+};
+
+export type SkinTypeSuitability = {
+  oily: "good" | "neutral" | "caution" | "avoid";
+  dry: "good" | "neutral" | "caution" | "avoid";
+  combination: "good" | "neutral" | "caution" | "avoid";
+  sensitive: "good" | "neutral" | "caution" | "avoid";
+  normal: "good" | "neutral" | "caution" | "avoid";
+  reasoning: string;
+};
+
+export type Verdict = {
+  signal: "green" | "yellow" | "red";
+  headline: string;
+  summary: string;
+};
 
 export type Extraction = {
   ingredients: string[];
-  detected_actives: string[];
+  detected_actives: ActiveIngredient[];
   concentration_clues: string;
   usage_instructions: string;
+  ph_notes: string;
 };
 
 export type RiskAssessment = {
@@ -23,37 +46,59 @@ export type RiskAssessment = {
 };
 
 type ResultContextValue = {
-  extraction: Extraction | null;
-  setExtraction: (value: Extraction | null) => void;
-  riskAssessment: RiskAssessment | null;
-  setRiskAssessment: (value: RiskAssessment | null) => void;
   submittedUrl: string | null;
-  setSubmittedUrl: (value: string | null) => void;
+  setSubmittedUrl: (url: string | null) => void;
   productName: string | null;
-  setProductName: (value: string | null) => void;
+  setProductName: (name: string | null) => void;
+  productType: string | null;
+  setProductType: (type: string | null) => void;
+  extraction: Extraction | null;
+  setExtraction: (e: Extraction | null) => void;
+  riskAssessment: RiskAssessment | null;
+  setRiskAssessment: (r: RiskAssessment | null) => void;
+  verdict: Verdict | null;
+  setVerdict: (v: Verdict | null) => void;
+  skinTypeSuitability: SkinTypeSuitability | null;
+  setSkinTypeSuitability: (s: SkinTypeSuitability | null) => void;
+  ingredientInteractions: IngredientInteraction[];
+  setIngredientInteractions: (i: IngredientInteraction[]) => void;
+  whatThisProductDoes: string[];
+  setWhatThisProductDoes: (w: string[]) => void;
+  formulationStrengths: string[];
+  setFormulationStrengths: (s: string[]) => void;
+  formulationWeaknesses: string[];
+  setFormulationWeaknesses: (s: string[]) => void;
 };
 
-const ResultContext = createContext<ResultContextValue | undefined>(undefined);
+const ResultContext = createContext<ResultContextValue | null>(null);
 
 export function ResultProvider({ children }: { children: ReactNode }) {
-  const [extraction, setExtraction] = useState<Extraction | null>(null);
-  const [riskAssessment, setRiskAssessment] = useState<RiskAssessment | null>(
-    null
-  );
   const [submittedUrl, setSubmittedUrl] = useState<string | null>(null);
   const [productName, setProductName] = useState<string | null>(null);
+  const [productType, setProductType] = useState<string | null>(null);
+  const [extraction, setExtraction] = useState<Extraction | null>(null);
+  const [riskAssessment, setRiskAssessment] = useState<RiskAssessment | null>(null);
+  const [verdict, setVerdict] = useState<Verdict | null>(null);
+  const [skinTypeSuitability, setSkinTypeSuitability] = useState<SkinTypeSuitability | null>(null);
+  const [ingredientInteractions, setIngredientInteractions] = useState<IngredientInteraction[]>([]);
+  const [whatThisProductDoes, setWhatThisProductDoes] = useState<string[]>([]);
+  const [formulationStrengths, setFormulationStrengths] = useState<string[]>([]);
+  const [formulationWeaknesses, setFormulationWeaknesses] = useState<string[]>([]);
 
   return (
     <ResultContext.Provider
       value={{
-        extraction,
-        setExtraction,
-        riskAssessment,
-        setRiskAssessment,
-        submittedUrl,
-        setSubmittedUrl,
-        productName,
-        setProductName,
+        submittedUrl, setSubmittedUrl,
+        productName, setProductName,
+        productType, setProductType,
+        extraction, setExtraction,
+        riskAssessment, setRiskAssessment,
+        verdict, setVerdict,
+        skinTypeSuitability, setSkinTypeSuitability,
+        ingredientInteractions, setIngredientInteractions,
+        whatThisProductDoes, setWhatThisProductDoes,
+        formulationStrengths, setFormulationStrengths,
+        formulationWeaknesses, setFormulationWeaknesses,
       }}
     >
       {children}
@@ -62,10 +107,7 @@ export function ResultProvider({ children }: { children: ReactNode }) {
 }
 
 export function useResult() {
-  const context = useContext(ResultContext);
-  if (!context) {
-    throw new Error("useResult must be used within a ResultProvider");
-  }
-  return context;
+  const ctx = useContext(ResultContext);
+  if (!ctx) throw new Error("useResult must be used within ResultProvider");
+  return ctx;
 }
-
