@@ -324,7 +324,7 @@ export default function Home() {
         <nav className="nav">
           <div className="nav-logo">
             <div className="nav-logo-dot" />
-            Dermcheck
+            Before You Buy
           </div>
           <span className="nav-badge">Dermatology-informed</span>
         </nav>
@@ -400,7 +400,7 @@ export default function Home() {
         </main>
 
         <footer className="footer">
-          <span className="footer-text">© 2025 Dermcheck</span>
+          <span className="footer-text">© 2026 Before You Buy</span>
           <span className="footer-disclaimer">For informational use only — not a substitute for medical advice</span>
         </footer>
       </div>

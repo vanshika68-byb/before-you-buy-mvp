@@ -386,7 +386,7 @@ export default function Result() {
         <nav className="nav">
           <div className="nav-logo">
             <div className="nav-dot" />
-            Dermcheck
+            Before You Buy
           </div>
           <button className="nav-back" type="button" onClick={() => router.push("/")}>
             ← New analysis
@@ -651,7 +651,7 @@ export default function Result() {
           {/* Disclaimer */}
           <div className="disclaimer">
             <p className="disclaimer-text">
-              Dermcheck provides a general, dermatology-informed formulation screen. This is not medical advice, a diagnosis, or a substitute for consultation with a qualified dermatologist or healthcare professional. Individual responses to ingredients vary.
+              Before You Buy provides a general, dermatology-informed formulation screen. This is not medical advice, a diagnosis, or a substitute for consultation with a qualified dermatologist or healthcare professional. Individual responses to ingredients vary.
             </p>
           </div>
         </div>
