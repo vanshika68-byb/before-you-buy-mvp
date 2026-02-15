@@ -695,7 +695,7 @@ export default function Home() {
         </main>
 
         <footer className="footer">
-          <span className="footer-text">© 2025 Before You Buy</span>
+          <span className="footer-text">© 2026 Before You Buy</span>
           <span className="footer-disclaimer">For informational use only — not a substitute for medical advice</span>
         </footer>
       </div>
