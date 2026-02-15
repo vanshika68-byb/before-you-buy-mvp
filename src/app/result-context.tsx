@@ -60,6 +60,8 @@ type ResultContextValue = {
   setProductName: (name: string | null) => void;
   productType: string | null;
   setProductType: (type: string | null) => void;
+  productImageUrl: string | null;
+  setProductImageUrl: (url: string | null) => void;
   extraction: Extraction | null;
   setExtraction: (e: Extraction | null) => void;
   riskAssessment: RiskAssessment | null;
@@ -86,6 +88,7 @@ export function ResultProvider({ children }: { children: ReactNode }) {
   const [submittedUrl, setSubmittedUrl] = useState<string | null>(null);
   const [productName, setProductName] = useState<string | null>(null);
   const [productType, setProductType] = useState<string | null>(null);
+  const [productImageUrl, setProductImageUrl] = useState<string | null>(null);
   const [extraction, setExtraction] = useState<Extraction | null>(null);
   const [riskAssessment, setRiskAssessment] = useState<RiskAssessment | null>(null);
   const [verdict, setVerdict] = useState<Verdict | null>(null);
@@ -102,6 +105,7 @@ export function ResultProvider({ children }: { children: ReactNode }) {
         submittedUrl, setSubmittedUrl,
         productName, setProductName,
         productType, setProductType,
+        productImageUrl, setProductImageUrl,
         extraction, setExtraction,
         riskAssessment, setRiskAssessment,
         verdict, setVerdict,

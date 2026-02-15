@@ -12,6 +12,30 @@ const STEPS = [
   { id: "assess", label: "Generating safety screen", detail: "Applying clinical heuristics" },
 ];
 
+/** Gracefully renders product image or placeholder — never breaks layout */
+function ProductImage({ imageUrl, productName }: { imageUrl: string | null; productName: string }) {
+  const [failed, setFailed] = useState(false);
+
+  if (!imageUrl || failed) {
+    return (
+      <div className="product-image-wrap">
+        <span className="product-image-placeholder">🧴</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="product-image-wrap">
+      <img
+        className="product-image"
+        src={imageUrl}
+        alt={productName}
+        onError={() => setFailed(true)}
+      />
+    </div>
+  );
+}
+
 export default function Analyzing() {
   const router = useRouter();
   const {
@@ -21,6 +45,7 @@ export default function Analyzing() {
     setRiskAssessment,
     setProductName,
     setProductType,
+    setProductImageUrl,
     setVerdict,
     setSkinTypeSuitability,
     setIngredientInteractions,
@@ -32,6 +57,7 @@ export default function Analyzing() {
 
   const [steps, setSteps] = useState<StepState[]>(["waiting", "waiting", "waiting"]);
   const [error, setError] = useState<string | null>(null);
+  const [capturedImage, setCapturedImage] = useState<string | null>(null);
 
   function setStep(index: number, state: StepState) {
     setSteps((prev) => {
@@ -143,6 +169,13 @@ export default function Analyzing() {
         // Commit all state
         setProductName(rawProductName || null);
         setProductType(rawProductType || null);
+        setProductImageUrl(
+          typeof json?.product_image_url === "string" ? json.product_image_url : null
+        );
+        // Also show locally during analyzing
+        if (typeof json?.product_image_url === "string") {
+          setCapturedImage(json.product_image_url);
+        }
         setExtraction(safeExtraction);
         setRiskAssessment(safeRiskAssessment);
 
@@ -380,14 +413,47 @@ export default function Analyzing() {
         .step-detail-waiting { color: transparent; }
         .step-detail-active { color: var(--ink-muted); animation: pulse 1.5s ease infinite; }
         .step-detail-done { color: var(--ink-faint); }
+
+        .product-image-wrap {
+          width: 72px;
+          height: 72px;
+          border-radius: 10px;
+          overflow: hidden;
+          border: 1px solid var(--border);
+          background: var(--cream);
+          flex-shrink: 0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .product-image {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          display: block;
+        }
+        .product-image-placeholder {
+          font-size: 28px;
+          opacity: 0.4;
+        }
+        .card-header-row {
+          display: flex;
+          align-items: flex-start;
+          gap: 16px;
+          margin-bottom: 32px;
+        }
+        .card-header-text { flex: 1; }
       `}</style>
 
       <main className="page">
         <div className="card">
-          <div className="card-header">
-            <div className="card-eyebrow">Running analysis</div>
-            <h1 className="card-title">Formulation screen</h1>
-            <p className="card-sub">This usually takes 10–20 seconds</p>
+          <div className="card-header-row">
+            <ProductImage imageUrl={capturedImage} productName="Product" />
+            <div className="card-header-text">
+              <div className="card-eyebrow">Running analysis</div>
+              <h1 className="card-title">Formulation screen</h1>
+              <p className="card-sub">This usually takes 10–20 seconds</p>
+            </div>
           </div>
 
           <div className="progress-track">

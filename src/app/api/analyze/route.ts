@@ -48,6 +48,7 @@ export type RiskAssessment = {
 export type AnalysisResult = {
   product_name: string;
   product_type: string;
+  product_image_url: string | null;
   extraction: Extraction;
   what_this_product_does: string[];
   skin_type_suitability: SkinTypeSuitability | null;
@@ -303,30 +304,116 @@ function focusOnIngredients(text: string): string {
  * URL fetch
  * ------------------------------------------------------------------ */
 
-async function fetchUrlContent(url: string): Promise<string | null> {
-  try {
-    console.log("[fetch_url] Fetching:", url);
-    const response = await fetch(url, {
+/** Extract og:image or twitter:image from raw HTML */
+function extractProductImage(html: string): string | null {
+  // Try og:image (both attribute orderings)
+  const ogPatterns = [
+    /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i,
+    /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i,
+    /<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i,
+    /<meta[^>]+content=["']([^"']+)["'][^>]+name=["']twitter:image["']/i,
+  ];
+  for (const pattern of ogPatterns) {
+    const match = html.match(pattern);
+    if (match?.[1]) {
+      const url = match[1].trim();
+      // Basic sanity check — must look like an image URL
+      if (url.startsWith("http") && /\.(jpg|jpeg|png|webp|avif|gif)/i.test(url)) {
+        return url;
+      }
+      // Some og:images don't have extensions but are still valid CDN URLs
+      if (url.startsWith("http") && url.length > 10) {
+        return url;
+      }
+    }
+  }
+  return null;
+}
+
+type FetchResult = {
+  text: string | null;
+  imageUrl: string | null;
+};
+
+/** Rotate through realistic browser User-Agent strings */
+const USER_AGENTS = [
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_2_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+];
+
+function randomUserAgent(): string {
+  return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
+}
+
+/** Build realistic browser-like headers */
+function buildHeaders(url: string): Record<string, string> {
+  const { origin } = new URL(url);
+  return {
+    "User-Agent": randomUserAgent(),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
+    "Referer": origin,
+  };
+}
+
+async function fetchUrlContent(url: string): Promise<FetchResult> {
+  // Attempt 1: Full browser-like headers
+  // Attempt 2: Minimal headers (some sites block over-specified requests)
+  const attempts = [
+    () => fetch(url, { headers: buildHeaders(url) }),
+    () => fetch(url, {
       headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "User-Agent": randomUserAgent(),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
       },
-    });
+    }),
+  ];
 
-    if (!response.ok) {
-      console.log("[fetch_url] Non-OK response:", response.status);
-      return null;
+  for (let i = 0; i < attempts.length; i++) {
+    try {
+      console.log(`[fetch_url] Attempt ${i + 1} for:`, url);
+      const response = await attempts[i]();
+
+      if (response.status === 403 || response.status === 429) {
+        console.log(`[fetch_url] Attempt ${i + 1} blocked (${response.status}), ${i < attempts.length - 1 ? "retrying" : "giving up"}`);
+        // Small delay before retry
+        if (i < attempts.length - 1) await new Promise(r => setTimeout(r, 800));
+        continue;
+      }
+
+      if (!response.ok) {
+        console.log(`[fetch_url] Non-OK response: ${response.status}`);
+        return { text: null, imageUrl: null };
+      }
+
+      const html = await response.text();
+      const imageUrl = extractProductImage(html);
+      console.log("[fetch_url] og:image found:", imageUrl ?? "none");
+
+      const visibleText = extractVisibleText(html);
+      return { text: focusOnIngredients(visibleText), imageUrl };
+
+    } catch (error) {
+      console.log(`[fetch_url] Attempt ${i + 1} error:`, error);
+      if (i === attempts.length - 1) return { text: null, imageUrl: null };
     }
-
-    const html = await response.text();
-    const visibleText = extractVisibleText(html);
-    return focusOnIngredients(visibleText);
-  } catch (error) {
-    console.log("[fetch_url] Error:", error);
-    return null;
   }
+
+  // All attempts failed — return null so LLM falls back to training knowledge
+  console.log("[fetch_url] All attempts failed for:", url);
+  return { text: null, imageUrl: null };
 }
 
 /* ------------------------------------------------------------------
@@ -417,7 +504,8 @@ const ACTIVE_KEYWORDS: { kw: string; function: string }[] = [
 
 function mapToFrontendSchema(
   analysis: LLMAnalysisResponse,
-  fallbackProductName: string
+  fallbackProductName: string,
+  productImageUrl: string | null = null
 ): AnalysisResult {
   const productName =
     (typeof analysis.product_name === "string" && analysis.product_name.trim()) ||
@@ -521,6 +609,7 @@ function mapToFrontendSchema(
   return {
     product_name: productName,
     product_type: productType,
+    product_image_url: productImageUrl,
     extraction,
     what_this_product_does,
     skin_type_suitability,
@@ -607,6 +696,7 @@ export async function POST(request: Request) {
   const empty = (name = ""): AnalysisResult => ({
     product_name: name,
     product_type: "unknown",
+    product_image_url: null,
     extraction: {
       ingredients: [],
       detected_actives: [],
@@ -676,6 +766,7 @@ Then output the strict JSON.`;
 
   let loopCount = 0;
   const maxLoops = 3;
+  let capturedImageUrl: string | null = null;
 
   while (result.finishReason === "tool_calls" && loopCount < maxLoops) {
     loopCount++;
@@ -692,13 +783,16 @@ Then output the strict JSON.`;
           if (typeof args.url === "string") targetUrl = args.url;
         } catch { /* use default */ }
 
-        const content = await fetchUrlContent(targetUrl);
+        const { text, imageUrl } = await fetchUrlContent(targetUrl);
+        // Capture the first image we find across all fetch calls
+        if (imageUrl && !capturedImageUrl) capturedImageUrl = imageUrl;
+
         messages.push({
           role: "tool",
           tool_call_id: toolCall.id,
-          content:
-            content ??
-            "Error: Unable to retrieve page content. Analyze based on your training knowledge, and set certainty_level to 'low'.",
+          content: text ?? `Error: Unable to retrieve page content from ${targetUrl} (likely bot protection). 
+Please analyze this product using your training knowledge. Look up: ${targetUrl}
+Set certainty_level to "low" and note in missing_or_unclear_information that the ingredient list could not be verified from the live page.`,
         });
       } else {
         messages.push({ role: "tool", tool_call_id: toolCall.id, content: "Error: Unknown tool." });
@@ -720,8 +814,8 @@ Then output the strict JSON.`;
   if (!parsed) return Response.json({ ...empty(fallbackName), error: "Invalid model response." });
   if (parsed.error) return Response.json({ ...empty(fallbackName), error: parsed.error });
 
-  const mapped = mapToFrontendSchema(parsed, fallbackName);
-  console.log("[api/analyze] Done. Verdict:", mapped.verdict?.signal);
+  const mapped = mapToFrontendSchema(parsed, fallbackName, capturedImageUrl);
+  console.log("[api/analyze] Done. Verdict:", mapped.verdict?.signal, "| Image:", capturedImageUrl ? "found" : "none");
 
   return Response.json(mapped);
 }

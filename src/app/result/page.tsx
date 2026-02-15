@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useResult } from "../result-context";
 
@@ -51,11 +52,35 @@ const INTERACTION_CONFIG: Record<string, { label: string; bg: string; text: stri
   redundancy: { label: "Redundancy", bg: "#F0F4FF", text: "#1E3A8A", border: "#93C5FD" },
 };
 
+/** Gracefully renders product image or nothing — never breaks layout */
+function ProductImage({ imageUrl, productName }: { imageUrl: string | null; productName: string }) {
+  const [failed, setFailed] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  // No image available — render nothing, layout stays clean
+  if (!imageUrl || failed) {
+    return null;
+  }
+
+  return (
+    <div className="product-image-wrap" style={{ opacity: loaded ? 1 : 0, transition: "opacity 0.3s ease" }}>
+      <img
+        className="product-image"
+        src={imageUrl}
+        alt={productName}
+        onLoad={() => setLoaded(true)}
+        onError={() => setFailed(true)}
+      />
+    </div>
+  );
+}
+
 export default function Result() {
   const router = useRouter();
   const {
     productName: rawProductName,
     productType,
+    productImageUrl,
     extraction,
     riskAssessment,
     verdict,
@@ -241,6 +266,37 @@ export default function Result() {
           border-radius: 20px;
         }
 
+        /* Product image */
+        .product-header-row {
+          display: flex;
+          align-items: flex-start;
+          gap: 20px;
+          margin-bottom: 32px;
+        }
+        .product-header-text { flex: 1; min-width: 0; }
+        .product-image-wrap {
+          width: 88px;
+          height: 88px;
+          border-radius: 12px;
+          overflow: hidden;
+          border: 1px solid var(--border);
+          background: var(--cream);
+          flex-shrink: 0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .product-image {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          display: block;
+        }
+        .product-image-placeholder {
+          font-size: 36px;
+          opacity: 0.35;
+        }
+
         /* Section cards */
         .section {
           background: #fff;
@@ -420,19 +476,22 @@ export default function Result() {
 
         <div className="layout">
           {/* Product header */}
-          <div className="product-header">
-            <div className="product-meta">
-              {productType && productType !== "unknown" && (
-                <span className="product-type-badge">{productType}</span>
-              )}
-              {skinProfile && (
-                <span className="profile-chip">
-                  🧴 Personalised
-                </span>
-              )}
-              <span className="product-date">{assessmentDate}</span>
+          <div className="product-header-row product-header">
+            <ProductImage imageUrl={productImageUrl} productName={productName} />
+            <div className="product-header-text">
+              <div className="product-meta">
+                {productType && productType !== "unknown" && (
+                  <span className="product-type-badge">{productType}</span>
+                )}
+                {skinProfile && (
+                  <span className="profile-chip">
+                    🧴 Personalised
+                  </span>
+                )}
+                <span className="product-date">{assessmentDate}</span>
+              </div>
+              <h1 className="product-name">{productName}</h1>
             </div>
-            <h1 className="product-name">{productName}</h1>
           </div>
 
           {/* Verdict hero */}
