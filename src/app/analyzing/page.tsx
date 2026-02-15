@@ -27,6 +27,7 @@ export default function Analyzing() {
     setWhatThisProductDoes,
     setFormulationStrengths,
     setFormulationWeaknesses,
+    skinProfile,
   } = useResult();
 
   const [steps, setSteps] = useState<StepState[]>(["waiting", "waiting", "waiting"]);
@@ -57,7 +58,7 @@ export default function Analyzing() {
         const response = await fetch("/api/analyze", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url }),
+          body: JSON.stringify({ url, ...(skinProfile ? { skin_profile: skinProfile } : {}) }),
         });
 
         if (cancelled) return;

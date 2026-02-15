@@ -27,6 +27,7 @@ export type Verdict = {
   signal: "green" | "yellow" | "red";
   headline: string;
   summary: string;
+  personalized_note?: string;
 };
 
 export type Extraction = {
@@ -43,6 +44,13 @@ export type RiskAssessment = {
   confidence_level: "low" | "medium" | "high";
   confidence_reason: string;
   disclaimer: string;
+};
+
+export type SkinProfile = {
+  skin_type?: "oily" | "dry" | "combination" | "sensitive" | "normal";
+  concerns?: string[];
+  known_allergies?: string;
+  current_routine?: string;
 };
 
 type ResultContextValue = {
@@ -68,6 +76,8 @@ type ResultContextValue = {
   setFormulationStrengths: (s: string[]) => void;
   formulationWeaknesses: string[];
   setFormulationWeaknesses: (s: string[]) => void;
+  skinProfile: SkinProfile | null;
+  setSkinProfile: (p: SkinProfile | null) => void;
 };
 
 const ResultContext = createContext<ResultContextValue | null>(null);
@@ -84,6 +94,7 @@ export function ResultProvider({ children }: { children: ReactNode }) {
   const [whatThisProductDoes, setWhatThisProductDoes] = useState<string[]>([]);
   const [formulationStrengths, setFormulationStrengths] = useState<string[]>([]);
   const [formulationWeaknesses, setFormulationWeaknesses] = useState<string[]>([]);
+  const [skinProfile, setSkinProfile] = useState<SkinProfile | null>(null);
 
   return (
     <ResultContext.Provider
@@ -99,6 +110,7 @@ export function ResultProvider({ children }: { children: ReactNode }) {
         whatThisProductDoes, setWhatThisProductDoes,
         formulationStrengths, setFormulationStrengths,
         formulationWeaknesses, setFormulationWeaknesses,
+        skinProfile, setSkinProfile,
       }}
     >
       {children}

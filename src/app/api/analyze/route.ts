@@ -126,16 +126,46 @@ const TOOLS = [
 ];
 
 /* ------------------------------------------------------------------
- * System prompt
+ * Skin profile type (mirrors frontend SkinProfile)
  * ------------------------------------------------------------------ */
 
-const SYSTEM_PROMPT = `You are a board-certified dermatologist and cosmetic chemist with deep expertise in formulation science.
+type SkinProfile = {
+  skin_type?: "oily" | "dry" | "combination" | "sensitive" | "normal";
+  concerns?: string[];
+  known_allergies?: string;
+  current_routine?: string;
+};
+
+/* ------------------------------------------------------------------
+ * System prompt builder
+ * ------------------------------------------------------------------ */
+
+function buildSystemPrompt(skinProfile?: SkinProfile): string {
+  const personalizationSection = skinProfile
+    ? `
+## User Skin Profile — CRITICAL: Personalise the entire analysis for this person
+
+- Skin type: ${skinProfile.skin_type ?? "not specified"}
+- Concerns: ${skinProfile.concerns?.join(", ") || "none specified"}
+- Known sensitivities/allergies: ${skinProfile.known_allergies || "none specified"}
+- Current actives in routine: ${skinProfile.current_routine || "none specified"}
+
+When a skin profile is provided you MUST:
+1. Weight your skin_type_suitability ratings with this person's skin type as the primary lens
+2. Actively check for conflicts between this product's ingredients and their current routine actives (e.g. adding AHA to an existing retinol routine = over-exfoliation risk)
+3. Flag their known allergies/sensitivities specifically if any appear in this product
+4. Set verdict.personalized_note to a direct 1-2 sentence note addressed TO this user explaining whether this product fits their specific situation — be concrete, not generic
+5. If their current routine creates a meaningful conflict, call it out clearly in ingredient_interactions
+`
+    : "";
+
+  return `You are a board-certified dermatologist and cosmetic chemist with deep expertise in formulation science.
 
 Your task:
 1. Use the fetch_url tool to retrieve the product page content.
 2. Reason carefully through the formulation before producing output.
 3. Return ONLY valid JSON — no prose, no markdown fences.
-
+${personalizationSection}
 ## Analysis Standards
 
 **Ingredient Analysis**
@@ -211,13 +241,15 @@ Your task:
     "verdict": {
       "signal": "green | yellow | red",
       "headline": "Max 7 words — punchy clinical verdict",
-      "summary": "2-3 plain-English sentences explaining the verdict for a non-expert"
+      "summary": "2-3 plain-English sentences explaining the verdict for a non-expert",
+      "personalized_note": "Only include when a skin profile was provided: 1-2 sentences addressed directly to this user about whether this product fits their specific skin type, concerns, and routine. Omit this field entirely if no skin profile was given."
     }
   },
   "professional_consideration": "One sentence about who should consult a professional before using this"
 }
 
 If the page cannot be retrieved, return: { "error": "Unable to retrieve product content." }`;
+}
 
 /* ------------------------------------------------------------------
  * HTML helpers
@@ -597,11 +629,32 @@ export async function POST(request: Request) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return Response.json({ ...empty(fallbackName), error: "API key not configured." });
 
-  const messages: ChatMessage[] = [
-    { role: "system", content: SYSTEM_PROMPT },
-    {
-      role: "user",
-      content: `Analyze this skincare product: ${url}
+  // Extract optional skin profile
+  const skinProfile: SkinProfile | undefined =
+    body && typeof body === "object" && (body as Record<string, unknown>).skin_profile
+      ? ((body as Record<string, unknown>).skin_profile as SkinProfile)
+      : undefined;
+
+  console.log("[api/analyze] Skin profile provided:", !!skinProfile);
+
+  // Build personalised user message
+  const userMessage = skinProfile
+    ? `Analyze this skincare product: ${url}
+
+The user has provided their skin profile:
+- Skin type: ${skinProfile.skin_type ?? "not specified"}
+- Concerns: ${skinProfile.concerns?.join(", ") || "none"}
+- Known sensitivities: ${skinProfile.known_allergies || "none"}
+- Current routine actives: ${skinProfile.current_routine || "none"}
+
+Before your JSON, briefly reason through:
+1. What type of product is this and what are its key actives?
+2. How does this fit with the user's ${skinProfile.skin_type ?? "unspecified"} skin type?
+3. Any conflicts with their current routine (${skinProfile.current_routine || "none listed"})?
+4. Does this product contain any of their known sensitivities (${skinProfile.known_allergies || "none listed"})?
+
+Then output the strict JSON with a personalized_note in the verdict.`
+    : `Analyze this skincare product: ${url}
 
 Before your JSON output, briefly think through:
 1. What type of product is this?
@@ -609,8 +662,11 @@ Before your JSON output, briefly think through:
 3. What is the probable formulation pH?
 4. Any notable ingredient interactions or conflicts?
 
-Then output the strict JSON.`,
-    },
+Then output the strict JSON.`;
+
+  const messages: ChatMessage[] = [
+    { role: "system", content: buildSystemPrompt(skinProfile) },
+    { role: "user", content: userMessage },
   ];
 
   let result = await callChatCompletions(apiKey, messages, true);

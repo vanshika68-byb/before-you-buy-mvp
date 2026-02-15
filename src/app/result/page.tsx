@@ -64,6 +64,7 @@ export default function Result() {
     whatThisProductDoes,
     formulationStrengths,
     formulationWeaknesses,
+    skinProfile,
   } = useResult();
 
   const productName = rawProductName || "Product analysis";
@@ -214,6 +215,30 @@ export default function Result() {
           font-weight: 300;
           padding-top: 14px;
           border-top: 1px solid rgba(0,0,0,0.07);
+        }
+        .verdict-personalized {
+          display: flex;
+          align-items: flex-start;
+          gap: 10px;
+          margin-top: 12px;
+          padding: 12px 14px;
+          border-radius: 8px;
+          background: rgba(0,0,0,0.05);
+          font-size: 13px;
+          line-height: 1.6;
+          font-weight: 400;
+        }
+        .verdict-personalized-icon { flex-shrink: 0; font-size: 14px; }
+        .profile-chip {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          font-size: 12px;
+          font-weight: 500;
+          color: var(--green);
+          background: var(--green-muted);
+          padding: 3px 10px;
+          border-radius: 20px;
         }
 
         /* Section cards */
@@ -400,6 +425,11 @@ export default function Result() {
               {productType && productType !== "unknown" && (
                 <span className="product-type-badge">{productType}</span>
               )}
+              {skinProfile && (
+                <span className="profile-chip">
+                  🧴 Personalised
+                </span>
+              )}
               <span className="product-date">{assessmentDate}</span>
             </div>
             <h1 className="product-name">{productName}</h1>
@@ -433,6 +463,12 @@ export default function Result() {
               <div className="verdict-summary" style={{ color: verdictCfg.text, opacity: 0.85 }}>
                 {verdict.summary}
               </div>
+              {verdict.personalized_note && (
+                <div className="verdict-personalized" style={{ color: verdictCfg.text }}>
+                  <span className="verdict-personalized-icon">👤</span>
+                  <span>{verdict.personalized_note}</span>
+                </div>
+              )}
             </div>
           )}
 
