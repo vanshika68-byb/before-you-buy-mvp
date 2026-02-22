@@ -1,753 +1,324 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useResult } from "../result-context";
+import type { ProductRecommendation } from "../result-context";
 
-const SKIN_TYPE_LABELS: Record<string, string> = {
-  oily: "Oily",
-  dry: "Dry",
-  combination: "Combination",
-  sensitive: "Sensitive",
-  normal: "Normal",
+const BUDGET_MAX: Record<string, number> = {
+  all: Infinity, budget: 500, mid: 2000, premium: 6000, luxury: Infinity,
 };
 
-const SUITABILITY_CONFIG: Record<string, { label: string; bg: string; text: string; border: string; dot: string }> = {
-  good: { label: "Good", bg: "#EBF2E4", text: "#2D5016", border: "#B8D49A", dot: "#4A7C2F" },
-  neutral: { label: "Neutral", bg: "#F7F4EF", text: "#4B4540", border: "#DDD8CF", dot: "#A09A93" },
-  caution: { label: "Caution", bg: "#FFFBEB", text: "#92400E", border: "#FCD34D", dot: "#D97706" },
-  avoid: { label: "Avoid", bg: "#FEF2F2", text: "#991B1B", border: "#FCA5A5", dot: "#DC2626" },
-};
-
-const VERDICT_CONFIG: Record<string, { bg: string; text: string; border: string; accent: string; icon: string; label: string }> = {
-  green: {
-    bg: "#EBF2E4",
-    text: "#2D5016",
-    border: "#B8D49A",
-    accent: "#4A7C2F",
-    icon: "✓",
-    label: "Generally Well-Suited",
-  },
-  yellow: {
-    bg: "#FFFBEB",
-    text: "#78350F",
-    border: "#FCD34D",
-    accent: "#D97706",
-    icon: "⚠",
-    label: "Use with Care",
-  },
-  red: {
-    bg: "#FEF2F2",
-    text: "#7F1D1D",
-    border: "#FCA5A5",
-    accent: "#DC2626",
-    icon: "✕",
-    label: "Significant Concerns",
-  },
-};
-
-const INTERACTION_CONFIG: Record<string, { label: string; bg: string; text: string; border: string }> = {
-  conflict: { label: "Conflict", bg: "#FEF2F2", text: "#991B1B", border: "#FCA5A5" },
-  synergy: { label: "Synergy", bg: "#EBF2E4", text: "#2D5016", border: "#B8D49A" },
-  redundancy: { label: "Redundancy", bg: "#F0F4FF", text: "#1E3A8A", border: "#93C5FD" },
-};
-
-/** Gracefully renders product image or nothing — never breaks layout */
-function ProductImage({ imageUrl, productName }: { imageUrl: string | null; productName: string }) {
-  const [failed, setFailed] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-
-  // No image available — render nothing, layout stays clean
-  if (!imageUrl || failed) {
-    return null;
-  }
-
+function MatchRing({ score }: { score: number }) {
+  const color = score >= 85 ? "#4ADE80" : score >= 70 ? "#C9A84C" : "#F87171";
+  const r = 16, circ = 2 * Math.PI * r;
+  const fill = (score / 100) * circ;
   return (
-    <div className="product-image-wrap" style={{ opacity: loaded ? 1 : 0, transition: "opacity 0.3s ease" }}>
-      <img
-        className="product-image"
-        src={imageUrl}
-        alt={productName}
-        onLoad={() => setLoaded(true)}
-        onError={() => setFailed(true)}
-      />
+    <div style={{ position: "relative", width: 44, height: 44, flexShrink: 0 }}>
+      <svg width={44} height={44} style={{ transform: "rotate(-90deg)" }}>
+        <circle cx={22} cy={22} r={r} fill="none" stroke="#2E2E28" strokeWidth={2.5} />
+        <circle cx={22} cy={22} r={r} fill="none" stroke={color} strokeWidth={2.5}
+          strokeDasharray={`${fill} ${circ}`} strokeLinecap="round" />
+      </svg>
+      <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, color }}>
+        {score}
+      </div>
     </div>
   );
 }
 
-export default function Result() {
+function ProductCard({ product, rank }: { product: ProductRecommendation; rank: number }) {
+  const [open, setOpen] = useState(false);
+  const isTop = rank === 0;
+
+  return (
+    <div style={{
+      background: isTop ? "linear-gradient(135deg,#1E1E1A,#221F14)" : "#1C1C18",
+      border: `1px solid ${isTop ? "#C9A84C" : "#2E2E28"}`,
+      borderRadius: 14,
+      overflow: "hidden",
+      transition: "border-color 0.2s",
+    }}>
+      {isTop && (
+        <div style={{ background: "#C9A84C", padding: "4px 16px" }}>
+          <span style={{ fontSize: 10, fontWeight: 700, color: "#0D0D0B", letterSpacing: "0.1em", textTransform: "uppercase" }}>
+            ★ Best match for your skin
+          </span>
+        </div>
+      )}
+
+      <div style={{ padding: "18px 22px" }}>
+        {/* Header */}
+        <div style={{ display: "flex", gap: 14, alignItems: "flex-start", marginBottom: 14 }}>
+          {/* Colour swatch */}
+          <div style={{
+            width: 52, height: 52, borderRadius: 10, flexShrink: 0,
+            background: product.image_placeholder_color || "#2A2A24",
+            border: "1px solid rgba(255,255,255,0.07)",
+          }} />
+
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 11, color: "#C9A84C", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 2 }}>
+              {product.brand}
+            </div>
+            <div style={{ fontSize: 15, color: "#F2EDE4", fontWeight: 500, lineHeight: 1.3, marginBottom: 6 }}>
+              {product.name}
+            </div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {product.fragrance_free && <Tag>Frag-free</Tag>}
+              {product.vegan && <Tag>Vegan</Tag>}
+              {product.cruelty_free && <Tag>Cruelty-free</Tag>}
+              <Tag>{product.texture}</Tag>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8, flexShrink: 0 }}>
+            <MatchRing score={product.match_score} />
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontSize: 15, color: "#F2EDE4", fontWeight: 600 }}>₹{product.price_inr.toLocaleString()}</div>
+              <div style={{ fontSize: 10, color: "#6B6560" }}>${product.price_usd}</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Explanation */}
+        <p style={{ fontSize: 13, color: "#B8B0A4", lineHeight: 1.55, marginBottom: 14 }}>
+          {product.explanation}
+        </p>
+
+        {/* Key ingredients */}
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+          {product.key_ingredients.slice(0, 5).map((ing, i) => (
+            <span key={i} style={{ fontSize: 11, padding: "3px 9px", borderRadius: 20, background: "#242420", color: "#B8B0A4", border: "1px solid #2E2E28" }}>
+              {ing}
+            </span>
+          ))}
+        </div>
+
+        {/* Expand */}
+        <button onClick={() => setOpen(o => !o)} style={{ background: "none", border: "none", color: "#6B6560", fontSize: 11, cursor: "pointer", padding: 0, marginBottom: open ? 14 : 0 }}>
+          {open ? "▲ Less" : "▼ Why this works"}
+        </button>
+
+        {open && (
+          <div style={{ borderTop: "1px solid #2E2E28", paddingTop: 14 }}>
+            {product.match_reasons.length > 0 && (
+              <div style={{ marginBottom: 12 }}>
+                {product.match_reasons.map((r, i) => (
+                  <div key={i} style={{ display: "flex", gap: 8, fontSize: 12, color: "#B8B0A4", marginBottom: 6 }}>
+                    <span style={{ color: "#4ADE80", flexShrink: 0 }}>✓</span>{r}
+                  </div>
+                ))}
+              </div>
+            )}
+            {product.avoid_if.length > 0 && (
+              <div>
+                <div style={{ fontSize: 10, color: "#6B6560", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>Use caution if</div>
+                {product.avoid_if.map((a, i) => (
+                  <div key={i} style={{ display: "flex", gap: 8, fontSize: 12, color: "#B8B0A4", marginBottom: 4 }}>
+                    <span style={{ color: "#F87171", flexShrink: 0 }}>·</span>{a}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Buy links */}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 16, paddingTop: 14, borderTop: "1px solid #2E2E28" }}>
+          {Object.entries(product.links).map(([store, url]) => {
+            if (!url || typeof url !== "string" || url.length === 0) return null;
+            return (
+              <a key={store} href={url} target="_blank" rel="noopener noreferrer" style={{
+                padding: "7px 14px", background: "#242420", border: "1px solid #3A3A34",
+                borderRadius: 8, color: "#B8B0A4", fontSize: 12, textDecoration: "none",
+                display: "inline-flex", alignItems: "center", gap: 4,
+                transition: "all 0.15s",
+              }}
+                onMouseEnter={e => { const el = e.currentTarget; el.style.borderColor = "#C9A84C"; el.style.color = "#F2EDE4"; }}
+                onMouseLeave={e => { const el = e.currentTarget; el.style.borderColor = "#3A3A34"; el.style.color = "#B8B0A4"; }}
+              >
+                {store.charAt(0).toUpperCase() + store.slice(1)} →
+              </a>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Tag({ children }: { children: React.ReactNode }) {
+  return (
+    <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 20, background: "#242420", color: "#B8B0A4", border: "1px solid #2E2E28" }}>
+      {children}
+    </span>
+  );
+}
+
+export default function Results() {
   const router = useRouter();
-  const {
-    productName: rawProductName,
-    productType,
-    productImageUrl,
-    extraction,
-    riskAssessment,
-    verdict,
-    skinTypeSuitability,
-    ingredientInteractions,
-    whatThisProductDoes,
-    formulationStrengths,
-    formulationWeaknesses,
-    skinProfile,
-  } = useResult();
+  const { skinAnalysis, recommendations, skinProfile } = useResult();
+  const [budgetFilter, setBudgetFilter] = useState("all");
+  const [fragranceFree, setFragranceFree] = useState(false);
+  const [veganOnly, setVeganOnly] = useState(false);
+  const [sortBy, setSortBy] = useState<"match" | "price_asc" | "price_desc">("match");
 
-  const productName = rawProductName || "Product analysis";
-  const detectedActives = extraction?.detected_actives ?? [];
-  const assessmentDate = new Date().toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  });
+  const filtered = useMemo(() => {
+    let list = [...recommendations];
+    const maxP = BUDGET_MAX[budgetFilter] ?? Infinity;
+    list = list.filter(r => r.price_inr <= maxP);
+    if (fragranceFree) list = list.filter(r => r.fragrance_free);
+    if (veganOnly) list = list.filter(r => r.vegan);
+    if (sortBy === "match") list.sort((a, b) => b.match_score - a.match_score);
+    else if (sortBy === "price_asc") list.sort((a, b) => a.price_inr - b.price_inr);
+    else list.sort((a, b) => b.price_inr - a.price_inr);
+    return list;
+  }, [recommendations, budgetFilter, fragranceFree, veganOnly, sortBy]);
 
-  const useCautionIf = riskAssessment?.avoid_if ?? [];
-  const confidenceLevel = riskAssessment?.confidence_level ?? "low";
-  const confidenceReason = riskAssessment?.confidence_reason ?? "";
+  if (!skinAnalysis || recommendations.length === 0) {
+    if (typeof window !== "undefined") router.replace("/");
+    return null;
+  }
 
-  const verdictCfg = verdict ? VERDICT_CONFIG[verdict.signal] : null;
+  const categoryLabel = skinProfile?.product_category?.replace(/_/g, " ") || "products";
 
   return (
     <>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;1,400&family=Syne:wght@400;500;600&display=swap');
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         :root {
-          --cream: #F7F4EF;
-          --cream-dark: #EDE8DF;
-          --ink: #1C1917;
-          --ink-muted: #6B6560;
-          --ink-faint: #A09A93;
-          --green: #2D5016;
-          --green-light: #4A7C2F;
-          --green-muted: #EBF2E4;
-          --border: #DDD8CF;
-          --serif: 'DM Serif Display', Georgia, serif;
-          --sans: 'DM Sans', system-ui, sans-serif;
+          --bg: #0D0D0B; --surface: #1C1C18; --surface2: #242420; --border: #2E2E28; --border-light: #3A3A34;
+          --gold: #C9A84C; --gold-light: rgba(201,168,76,0.12); --gold-muted: #A8884A;
+          --cream: #F2EDE4; --cream-muted: #B8B0A4; --cream-faint: #6B6560;
+          --serif: 'Playfair Display', Georgia, serif; --sans: 'Syne', system-ui, sans-serif;
         }
-        body { background: var(--cream); font-family: var(--sans); color: var(--ink); -webkit-font-smoothing: antialiased; }
+        html, body { background: var(--bg); color: var(--cream); font-family: var(--sans); min-height: 100vh; -webkit-font-smoothing: antialiased; }
+        @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
 
-        @keyframes fadeUp {
-          from { opacity: 0; transform: translateY(14px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
+        .nav { padding: 18px 40px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: rgba(13,13,11,0.92); backdrop-filter: blur(12px); z-index: 20; }
+        .nav-logo { font-family: var(--serif); font-size: 16px; color: var(--cream); display: flex; align-items: center; gap: 8px; }
+        .nav-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--gold); }
+        .nav-back { background: none; border: 1px solid var(--border); color: var(--cream-faint); padding: 6px 14px; border-radius: 8px; font-family: var(--sans); font-size: 12px; cursor: pointer; transition: all 0.15s; }
+        .nav-back:hover { border-color: var(--border-light); color: var(--cream-muted); }
 
-        .page { min-height: 100vh; padding: 0 0 80px; }
+        .layout { max-width: 1060px; margin: 0 auto; padding: 32px 24px 80px; display: grid; grid-template-columns: 260px 1fr; gap: 28px; }
 
-        /* Nav */
-        .nav {
-          padding: 20px 48px;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          border-bottom: 1px solid var(--border);
-          background: var(--cream);
-          position: sticky;
-          top: 0;
-          z-index: 10;
-          backdrop-filter: blur(8px);
-        }
-        .nav-logo { font-family: var(--serif); font-size: 17px; color: var(--ink); display: flex; align-items: center; gap: 7px; }
-        .nav-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
-        .nav-back {
-          font-size: 13px;
-          color: var(--ink-muted);
-          background: none;
-          border: 1px solid var(--border);
-          padding: 7px 14px;
-          border-radius: 6px;
-          cursor: pointer;
-          font-family: var(--sans);
-          font-weight: 400;
-          transition: border-color 0.15s ease, color 0.15s ease;
-        }
-        .nav-back:hover { border-color: var(--ink-muted); color: var(--ink); }
+        /* Skin panel */
+        .skin-panel { position: sticky; top: 72px; height: fit-content; animation: fadeUp 0.4s ease both; }
+        .skin-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+        .skin-card-top { padding: 18px 20px 14px; border-bottom: 1px solid var(--border); }
+        .skin-avatar { font-size: 22px; margin-bottom: 10px; }
+        .skin-card-title { font-family: var(--serif); font-size: 15px; color: var(--cream); margin-bottom: 2px; }
+        .skin-card-sub { font-size: 11px; color: var(--cream-faint); }
+        .skin-stats { padding: 4px 20px; }
+        .stat-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border); }
+        .stat-row:last-child { border-bottom: none; }
+        .stat-lbl { font-size: 11px; color: var(--cream-faint); text-transform: uppercase; letter-spacing: 0.06em; }
+        .stat-val { font-size: 12px; color: var(--cream-muted); font-weight: 500; }
+        .skin-summary { padding: 13px 20px; background: var(--gold-light); border-top: 1px solid rgba(201,168,76,0.15); font-size: 12px; color: var(--cream-muted); line-height: 1.55; font-style: italic; }
 
-        /* Layout */
-        .layout { max-width: 760px; margin: 0 auto; padding: 40px 24px 0; }
+        /* Main */
+        .main-col { animation: fadeUp 0.4s ease 0.1s both; }
+        .results-eyebrow { font-size: 11px; color: var(--cream-faint); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 6px; }
+        .results-title { font-family: var(--serif); font-size: clamp(22px, 3vw, 28px); color: var(--cream); line-height: 1.2; margin-bottom: 22px; }
+        .results-title em { font-style: italic; color: var(--gold); }
 
-        /* Product header */
-        .product-header {
-          margin-bottom: 32px;
-          animation: fadeUp 0.4s ease 0.05s both;
-        }
-        .product-meta {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          margin-bottom: 10px;
-        }
-        .product-type-badge {
-          font-size: 11px;
-          font-weight: 500;
-          letter-spacing: 0.06em;
-          text-transform: uppercase;
-          color: var(--green);
-          background: var(--green-muted);
-          padding: 3px 9px;
-          border-radius: 20px;
-        }
-        .product-date { font-size: 12px; color: var(--ink-faint); font-weight: 300; }
-        .product-name {
-          font-family: var(--serif);
-          font-size: clamp(22px, 4vw, 30px);
-          letter-spacing: -0.02em;
-          color: var(--ink);
-          line-height: 1.15;
-        }
+        /* Filter bar */
+        .filter-bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 20px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+        .filter-group { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+        .filter-sep { width: 1px; height: 18px; background: var(--border); margin: 0 4px; }
+        .f-btn { padding: 5px 12px; border-radius: 20px; border: 1px solid var(--border); background: var(--bg); color: var(--cream-muted); font-family: var(--sans); font-size: 11px; cursor: pointer; transition: all 0.15s; white-space: nowrap; }
+        .f-btn:hover { border-color: var(--border-light); }
+        .f-btn.on { border-color: var(--gold); background: var(--gold-light); color: var(--cream); }
+        .sort-sel { padding: 5px 10px; border-radius: 20px; border: 1px solid var(--border); background: var(--bg); color: var(--cream-muted); font-family: var(--sans); font-size: 11px; cursor: pointer; outline: none; }
 
-        /* Verdict card */
-        .verdict-card {
-          border-radius: 12px;
-          padding: 28px 28px 24px;
-          margin-bottom: 24px;
-          animation: fadeUp 0.4s ease 0.1s both;
-        }
-        .verdict-header {
-          display: flex;
-          align-items: flex-start;
-          gap: 16px;
-          margin-bottom: 14px;
-        }
-        .verdict-icon {
-          width: 40px;
-          height: 40px;
-          border-radius: 10px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 18px;
-          flex-shrink: 0;
-          font-weight: 600;
-        }
-        .verdict-meta { flex: 1; }
-        .verdict-signal-label {
-          font-size: 11px;
-          font-weight: 600;
-          letter-spacing: 0.07em;
-          text-transform: uppercase;
-          margin-bottom: 4px;
-          opacity: 0.7;
-        }
-        .verdict-headline {
-          font-family: var(--serif);
-          font-size: 22px;
-          letter-spacing: -0.01em;
-          line-height: 1.2;
-        }
-        .verdict-summary {
-          font-size: 14px;
-          line-height: 1.65;
-          font-weight: 300;
-          padding-top: 14px;
-          border-top: 1px solid rgba(0,0,0,0.07);
-        }
-        .verdict-personalized {
-          display: flex;
-          align-items: flex-start;
-          gap: 10px;
-          margin-top: 12px;
-          padding: 12px 14px;
-          border-radius: 8px;
-          background: rgba(0,0,0,0.05);
-          font-size: 13px;
-          line-height: 1.6;
-          font-weight: 400;
-        }
-        .verdict-personalized-icon { flex-shrink: 0; font-size: 14px; }
-        .profile-chip {
-          display: inline-flex;
-          align-items: center;
-          gap: 5px;
-          font-size: 12px;
-          font-weight: 500;
-          color: var(--green);
-          background: var(--green-muted);
-          padding: 3px 10px;
-          border-radius: 20px;
-        }
+        /* Products */
+        .products { display: flex; flex-direction: column; gap: 10px; }
+        .empty { padding: 48px 20px; text-align: center; color: var(--cream-faint); font-size: 13px; }
 
-        /* Product image */
-        .product-header-row {
-          display: flex;
-          align-items: flex-start;
-          gap: 20px;
-          margin-bottom: 32px;
-        }
-        .product-header-text { flex: 1; min-width: 0; }
-        .product-image-wrap {
-          width: 88px;
-          height: 88px;
-          border-radius: 12px;
-          overflow: hidden;
-          border: 1px solid var(--border);
-          background: var(--cream);
-          flex-shrink: 0;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-        .product-image {
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-          display: block;
-        }
-        .product-image-placeholder {
-          font-size: 36px;
-          opacity: 0.35;
-        }
+        .disclaimer { margin-top: 28px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; font-size: 11px; color: var(--cream-faint); line-height: 1.6; }
 
-        /* Section cards */
-        .section {
-          background: #fff;
-          border: 1px solid var(--border);
-          border-radius: 12px;
-          overflow: hidden;
-          margin-bottom: 16px;
-        }
-        .section-anim-1 { animation: fadeUp 0.4s ease 0.15s both; }
-        .section-anim-2 { animation: fadeUp 0.4s ease 0.2s both; }
-        .section-anim-3 { animation: fadeUp 0.4s ease 0.25s both; }
-        .section-anim-4 { animation: fadeUp 0.4s ease 0.3s both; }
-        .section-anim-5 { animation: fadeUp 0.4s ease 0.35s both; }
-        .section-anim-6 { animation: fadeUp 0.4s ease 0.4s both; }
-
-        .section-header {
-          padding: 18px 24px 16px;
-          border-bottom: 1px solid var(--cream-dark);
-          display: flex;
-          align-items: center;
-          gap: 10px;
-        }
-        .section-icon {
-          width: 28px;
-          height: 28px;
-          background: var(--cream);
-          border-radius: 7px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 14px;
-          flex-shrink: 0;
-        }
-        .section-title {
-          font-size: 14px;
-          font-weight: 600;
-          color: var(--ink);
-          letter-spacing: -0.01em;
-        }
-        .section-body { padding: 20px 24px; }
-
-        /* What it does */
-        .benefit-list { display: flex; flex-direction: column; gap: 10px; }
-        .benefit-item { display: flex; align-items: flex-start; gap: 10px; }
-        .benefit-dot {
-          width: 6px;
-          height: 6px;
-          border-radius: 50%;
-          background: var(--green);
-          flex-shrink: 0;
-          margin-top: 7px;
-        }
-        .benefit-text { font-size: 14px; line-height: 1.6; color: var(--ink-muted); font-weight: 300; }
-
-        /* Active ingredients */
-        .actives-grid { display: flex; flex-direction: column; gap: 12px; }
-        .active-item {
-          background: var(--cream);
-          border-radius: 8px;
-          padding: 14px 16px;
-          display: flex;
-          align-items: flex-start;
-          justify-content: space-between;
-          gap: 12px;
-        }
-        .active-name { font-size: 14px; font-weight: 500; color: var(--ink); margin-bottom: 3px; }
-        .active-function { font-size: 12px; color: var(--ink-muted); font-weight: 300; line-height: 1.4; }
-        .active-concentration {
-          font-size: 11px;
-          font-weight: 500;
-          color: var(--ink-faint);
-          background: var(--cream-dark);
-          padding: 3px 8px;
-          border-radius: 4px;
-          white-space: nowrap;
-          flex-shrink: 0;
-        }
-
-        /* Skin type grid */
-        .skin-grid {
-          display: grid;
-          grid-template-columns: repeat(5, 1fr);
-          gap: 8px;
-          margin-bottom: 16px;
-        }
-        .skin-cell {
-          border-radius: 8px;
-          padding: 12px 8px;
-          text-align: center;
-          border: 1px solid;
-        }
-        .skin-cell-type { font-size: 11px; font-weight: 500; margin-bottom: 6px; }
-        .skin-cell-dot {
-          width: 8px;
-          height: 8px;
-          border-radius: 50%;
-          margin: 0 auto 5px;
-        }
-        .skin-cell-label { font-size: 11px; font-weight: 500; }
-        .skin-reasoning { font-size: 13px; color: var(--ink-muted); line-height: 1.55; font-weight: 300; }
-
-        /* Interactions */
-        .interaction-list { display: flex; flex-direction: column; gap: 12px; }
-        .interaction-item { border-radius: 8px; padding: 14px 16px; border: 1px solid; }
-        .interaction-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-        .interaction-badge {
-          font-size: 10px;
-          font-weight: 600;
-          letter-spacing: 0.05em;
-          text-transform: uppercase;
-          padding: 2px 8px;
-          border-radius: 4px;
-        }
-        .interaction-ingredients { font-size: 13px; font-weight: 500; }
-        .interaction-explanation { font-size: 13px; font-weight: 300; line-height: 1.55; }
-
-        /* Strengths / Weaknesses */
-        .sw-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-        .sw-column {}
-        .sw-column-title { font-size: 12px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; margin-bottom: 12px; }
-        .sw-list { display: flex; flex-direction: column; gap: 8px; }
-        .sw-item { display: flex; align-items: flex-start; gap: 8px; }
-        .sw-dot { font-size: 13px; flex-shrink: 0; margin-top: 1px; }
-        .sw-text { font-size: 13px; color: var(--ink-muted); line-height: 1.5; font-weight: 300; }
-
-        /* Caution if */
-        .caution-list { display: flex; flex-direction: column; gap: 8px; }
-        .caution-item { display: flex; align-items: flex-start; gap: 10px; }
-        .caution-icon { font-size: 13px; flex-shrink: 0; margin-top: 2px; }
-        .caution-text { font-size: 14px; line-height: 1.55; color: var(--ink); font-weight: 300; }
-
-        /* Confidence */
-        .confidence-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
-        .confidence-badge {
-          font-size: 13px;
-          font-weight: 600;
-          padding: 5px 12px;
-          border-radius: 6px;
-        }
-        .confidence-high { background: var(--green-muted); color: var(--green); }
-        .confidence-medium { background: #FFFBEB; color: #92400E; }
-        .confidence-low { background: #F3F4F6; color: #374151; }
-        .confidence-text { font-size: 13px; color: var(--ink-muted); line-height: 1.55; font-weight: 300; }
-
-        /* Disclaimer */
-        .disclaimer {
-          background: #F9FAFB;
-          border: 1px solid var(--border);
-          border-radius: 10px;
-          padding: 18px 20px;
-          margin-top: 24px;
-          animation: fadeUp 0.4s ease 0.45s both;
-        }
-        .disclaimer-text { font-size: 12px; line-height: 1.65; color: var(--ink-faint); font-style: italic; font-weight: 300; }
-
-        .empty-text { font-size: 14px; color: var(--ink-faint); font-weight: 300; font-style: italic; }
-
-        @media (max-width: 600px) {
-          .nav { padding: 16px 20px; }
-          .layout { padding: 28px 16px 0; }
-          .skin-grid { grid-template-columns: repeat(5, 1fr); gap: 6px; }
-          .skin-cell { padding: 10px 4px; }
-          .sw-grid { grid-template-columns: 1fr; }
+        @media (max-width: 768px) {
+          .layout { grid-template-columns: 1fr; }
+          .skin-panel { position: static; }
+          .nav { padding: 14px 20px; }
         }
       `}</style>
 
-      <div className="page">
-        <nav className="nav">
-          <div className="nav-logo">
-            <div className="nav-dot" />
-            Before You Buy
+      <nav className="nav">
+        <div className="nav-logo"><div className="nav-dot" />Before You Buy</div>
+        <button className="nav-back" onClick={() => router.push("/")}>← New search</button>
+      </nav>
+
+      <div className="layout">
+        {/* Skin profile panel */}
+        <div className="skin-panel">
+          <div className="skin-card">
+            <div className="skin-card-top">
+              <div className="skin-avatar">◎</div>
+              <div className="skin-card-title">Your skin profile</div>
+              <div className="skin-card-sub">Analysed from your photo</div>
+            </div>
+            <div className="skin-stats">
+              {[
+                { label: "Skin type", value: skinAnalysis.skin_type.charAt(0).toUpperCase() + skinAnalysis.skin_type.slice(1) },
+                { label: "Tone", value: skinAnalysis.tone },
+                { label: "Acne", value: skinAnalysis.acne_severity === "none" ? "Clear" : skinAnalysis.acne_severity.charAt(0).toUpperCase() + skinAnalysis.acne_severity.slice(1) },
+                { label: "Oiliness", value: skinAnalysis.oiliness.charAt(0).toUpperCase() + skinAnalysis.oiliness.slice(1) },
+                { label: "Sensitivity", value: skinAnalysis.sensitivity.charAt(0).toUpperCase() + skinAnalysis.sensitivity.slice(1) },
+                { label: "Pigmentation", value: skinAnalysis.hyperpigmentation === "none" ? "None" : skinAnalysis.hyperpigmentation.charAt(0).toUpperCase() + skinAnalysis.hyperpigmentation.slice(1) },
+              ].map(({ label, value }) => (
+                <div key={label} className="stat-row">
+                  <span className="stat-lbl">{label}</span>
+                  <span className="stat-val">{value}</span>
+                </div>
+              ))}
+            </div>
+            <div className="skin-summary">{skinAnalysis.summary}</div>
           </div>
-          <button className="nav-back" type="button" onClick={() => router.push("/")}>
-            ← New analysis
-          </button>
-        </nav>
+        </div>
 
-        <div className="layout">
-          {/* Product header */}
-          <div className="product-header-row product-header">
-            <ProductImage imageUrl={productImageUrl} productName={productName} />
-            <div className="product-header-text">
-              <div className="product-meta">
-                {productType && productType !== "unknown" && (
-                  <span className="product-type-badge">{productType}</span>
-                )}
-                {skinProfile && (
-                  <span className="profile-chip">
-                    🧴 Personalised
-                  </span>
-                )}
-                <span className="product-date">{assessmentDate}</span>
-              </div>
-              <h1 className="product-name">{productName}</h1>
-            </div>
-          </div>
-
-          {/* Verdict hero */}
-          {verdict && verdictCfg && (
-            <div
-              className="verdict-card"
-              style={{
-                background: verdictCfg.bg,
-                border: `1px solid ${verdictCfg.border}`,
-              }}
-            >
-              <div className="verdict-header">
-                <div
-                  className="verdict-icon"
-                  style={{ background: verdictCfg.accent, color: "#fff" }}
-                >
-                  {verdictCfg.icon}
-                </div>
-                <div className="verdict-meta">
-                  <div className="verdict-signal-label" style={{ color: verdictCfg.text }}>
-                    {verdictCfg.label}
-                  </div>
-                  <div className="verdict-headline" style={{ color: verdictCfg.text }}>
-                    {verdict.headline}
-                  </div>
-                </div>
-              </div>
-              <div className="verdict-summary" style={{ color: verdictCfg.text, opacity: 0.85 }}>
-                {verdict.summary}
-              </div>
-              {verdict.personalized_note && (
-                <div className="verdict-personalized" style={{ color: verdictCfg.text }}>
-                  <span className="verdict-personalized-icon">👤</span>
-                  <span>{verdict.personalized_note}</span>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* What this product does */}
-          {whatThisProductDoes.length > 0 && (
-            <div className="section section-anim-1">
-              <div className="section-header">
-                <div className="section-icon">✦</div>
-                <span className="section-title">What this product does</span>
-              </div>
-              <div className="section-body">
-                <div className="benefit-list">
-                  {whatThisProductDoes.map((item, i) => (
-                    <div className="benefit-item" key={i}>
-                      <div className="benefit-dot" />
-                      <span className="benefit-text">{item}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Active ingredients */}
-          {detectedActives.length > 0 && (
-            <div className="section section-anim-2">
-              <div className="section-header">
-                <div className="section-icon">⚗</div>
-                <span className="section-title">Active ingredients ({detectedActives.length})</span>
-              </div>
-              <div className="section-body">
-                <div className="actives-grid">
-                  {detectedActives.map((active, i) => (
-                    <div className="active-item" key={i}>
-                      <div style={{ flex: 1 }}>
-                        <div className="active-name">{active.name}</div>
-                        <div className="active-function">{active.function}</div>
-                      </div>
-                      {active.concentration_estimate && (
-                        <span className="active-concentration">
-                          {active.concentration_estimate}
-                        </span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Skin type suitability */}
-          {skinTypeSuitability && (
-            <div className="section section-anim-3">
-              <div className="section-header">
-                <div className="section-icon">🧬</div>
-                <span className="section-title">Skin type suitability</span>
-              </div>
-              <div className="section-body">
-                <div className="skin-grid">
-                  {(["oily", "dry", "combination", "sensitive", "normal"] as const).map((type) => {
-                    const rating = skinTypeSuitability[type];
-                    const cfg = SUITABILITY_CONFIG[rating] ?? SUITABILITY_CONFIG.neutral;
-                    return (
-                      <div
-                        className="skin-cell"
-                        key={type}
-                        style={{
-                          background: cfg.bg,
-                          borderColor: cfg.border,
-                          color: cfg.text,
-                        }}
-                      >
-                        <div className="skin-cell-type" style={{ color: cfg.text, opacity: 0.7 }}>
-                          {SKIN_TYPE_LABELS[type]}
-                        </div>
-                        <div
-                          className="skin-cell-dot"
-                          style={{ background: cfg.dot }}
-                        />
-                        <div className="skin-cell-label" style={{ color: cfg.text }}>
-                          {cfg.label}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-                <p className="skin-reasoning">{skinTypeSuitability.reasoning}</p>
-              </div>
-            </div>
-          )}
-
-          {/* Ingredient interactions */}
-          {ingredientInteractions.length > 0 && (
-            <div className="section section-anim-4">
-              <div className="section-header">
-                <div className="section-icon">⚡</div>
-                <span className="section-title">
-                  Ingredient interactions ({ingredientInteractions.length})
-                </span>
-              </div>
-              <div className="section-body">
-                <div className="interaction-list">
-                  {ingredientInteractions.map((interaction, i) => {
-                    const cfg = INTERACTION_CONFIG[interaction.interaction_type] ?? INTERACTION_CONFIG.conflict;
-                    return (
-                      <div
-                        className="interaction-item"
-                        key={i}
-                        style={{ background: cfg.bg, borderColor: cfg.border }}
-                      >
-                        <div className="interaction-header">
-                          <span
-                            className="interaction-badge"
-                            style={{ background: cfg.border, color: cfg.text }}
-                          >
-                            {cfg.label}
-                          </span>
-                          <span className="interaction-ingredients" style={{ color: cfg.text }}>
-                            {interaction.ingredients.join(" + ")}
-                          </span>
-                        </div>
-                        <p className="interaction-explanation" style={{ color: cfg.text, opacity: 0.8 }}>
-                          {interaction.explanation}
-                        </p>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Strengths & Weaknesses */}
-          {(formulationStrengths.length > 0 || formulationWeaknesses.length > 0) && (
-            <div className="section section-anim-5">
-              <div className="section-header">
-                <div className="section-icon">⚖</div>
-                <span className="section-title">Formulation assessment</span>
-              </div>
-              <div className="section-body">
-                <div className="sw-grid">
-                  {formulationStrengths.length > 0 && (
-                    <div className="sw-column">
-                      <div className="sw-column-title" style={{ color: "#2D5016" }}>Strengths</div>
-                      <div className="sw-list">
-                        {formulationStrengths.map((s, i) => (
-                          <div className="sw-item" key={i}>
-                            <span className="sw-dot">✓</span>
-                            <span className="sw-text">{s}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {formulationWeaknesses.length > 0 && (
-                    <div className="sw-column">
-                      <div className="sw-column-title" style={{ color: "#991B1B" }}>Weaknesses</div>
-                      <div className="sw-list">
-                        {formulationWeaknesses.map((s, i) => (
-                          <div className="sw-item" key={i}>
-                            <span className="sw-dot">✕</span>
-                            <span className="sw-text">{s}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Use caution if */}
-          {useCautionIf.length > 0 && (
-            <div className="section section-anim-5">
-              <div className="section-header">
-                <div className="section-icon">⚠</div>
-                <span className="section-title">Use caution if you have</span>
-              </div>
-              <div className="section-body">
-                <div className="caution-list">
-                  {useCautionIf.map((item, i) => (
-                    <div className="caution-item" key={i}>
-                      <span className="caution-icon">·</span>
-                      <span className="caution-text">{item}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Assessment certainty */}
-          <div className="section section-anim-6">
-            <div className="section-header">
-              <div className="section-icon">◎</div>
-              <span className="section-title">Assessment certainty</span>
-            </div>
-            <div className="section-body">
-              <div className="confidence-row">
-                <span
-                  className={`confidence-badge confidence-${
-                    confidenceLevel === "high" ? "high" : confidenceLevel === "medium" ? "medium" : "low"
-                  }`}
-                >
-                  {confidenceLevel.charAt(0).toUpperCase() + confidenceLevel.slice(1)}
-                </span>
-              </div>
-              <p className="confidence-text">
-                {confidenceReason ||
-                  "Certainty is limited when concentration, formulation details, or the ingredient list are not fully disclosed on the product page."}
-              </p>
-            </div>
+        {/* Results */}
+        <div className="main-col">
+          <div className="results-eyebrow">{recommendations.length} products found</div>
+          <div className="results-title">
+            Best <em>{categoryLabel}s</em><br />for your skin
           </div>
 
-          {/* Disclaimer */}
+          {/* Filter bar */}
+          <div className="filter-bar">
+            <div className="filter-group">
+              {["all", "budget", "mid", "premium", "luxury"].map(b => (
+                <button key={b} className={`f-btn ${budgetFilter === b ? "on" : ""}`} onClick={() => setBudgetFilter(b)}>
+                  {b === "all" ? "Any price" : b.charAt(0).toUpperCase() + b.slice(1)}
+                </button>
+              ))}
+            </div>
+            <div className="filter-sep" />
+            <div className="filter-group">
+              <button className={`f-btn ${fragranceFree ? "on" : ""}`} onClick={() => setFragranceFree(f => !f)}>Frag-free</button>
+              <button className={`f-btn ${veganOnly ? "on" : ""}`} onClick={() => setVeganOnly(v => !v)}>Vegan</button>
+            </div>
+            <div className="filter-sep" />
+            <select className="sort-sel" value={sortBy} onChange={e => setSortBy(e.target.value as typeof sortBy)}>
+              <option value="match">Best match</option>
+              <option value="price_asc">Price: low to high</option>
+              <option value="price_desc">Price: high to low</option>
+            </select>
+          </div>
+
+          {filtered.length === 0 ? (
+            <div className="empty">No products match these filters. Try adjusting your criteria.</div>
+          ) : (
+            <div className="products">
+              {filtered.map((p, i) => <ProductCard key={p.id} product={p} rank={i} />)}
+            </div>
+          )}
+
           <div className="disclaimer">
-            <p className="disclaimer-text">
-              Before You Buy provides a general, dermatology-informed formulation screen. This is not medical advice, a diagnosis, or a substitute for consultation with a qualified dermatologist or healthcare professional. Individual responses to ingredients vary.
-            </p>
+            Before You Buy uses AI skin analysis and ingredient matching to surface relevant products. This is not medical advice. Individual results vary. Consult a dermatologist for persistent skin concerns.
           </div>
         </div>
       </div>

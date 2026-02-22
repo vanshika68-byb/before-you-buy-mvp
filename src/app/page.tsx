@@ -1,703 +1,403 @@
 "use client";
 
+import { useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
-import { useResult, type SkinProfile } from "./result-context";
-
-const SKIN_TYPES = [
-  { value: "oily", label: "Oily" },
-  { value: "dry", label: "Dry" },
-  { value: "combination", label: "Combination" },
-  { value: "sensitive", label: "Sensitive" },
-  { value: "normal", label: "Normal" },
-] as const;
+import { useResult } from "./result-context";
+import type { SkinProfile } from "./result-context";
 
 const CONCERNS = [
-  { value: "acne", label: "Acne & breakouts" },
-  { value: "anti-aging", label: "Anti-aging" },
-  { value: "hyperpigmentation", label: "Dark spots" },
-  { value: "redness", label: "Redness & rosacea" },
-  { value: "dryness", label: "Dryness" },
-  { value: "sensitivity", label: "Sensitivity" },
-  { value: "large-pores", label: "Large pores" },
-  { value: "dullness", label: "Dullness" },
+  { id: "acne", label: "Acne & breakouts", icon: "●" },
+  { id: "dark_spots", label: "Dark spots", icon: "◐" },
+  { id: "dryness", label: "Dryness & dehydration", icon: "◌" },
+  { id: "oiliness", label: "Oiliness & shine", icon: "◉" },
+  { id: "anti_aging", label: "Anti-aging", icon: "◎" },
+  { id: "sensitivity", label: "Redness & sensitivity", icon: "◇" },
+  { id: "uneven_tone", label: "Uneven skin tone", icon: "◑" },
+  { id: "pores", label: "Large pores", icon: "⊙" },
 ];
+
+const PRODUCT_CATEGORIES = [
+  { id: "cleanser", label: "Cleanser", icon: "◌", sub: "Face wash or cleansing balm" },
+  { id: "toner", label: "Toner", icon: "◎", sub: "Balancing & hydrating toner" },
+  { id: "serum", label: "Serum", icon: "✦", sub: "Targeted treatment serum" },
+  { id: "moisturizer", label: "Moisturizer", icon: "◉", sub: "Hydrating face cream or gel" },
+  { id: "sunscreen", label: "Sunscreen", icon: "☀", sub: "SPF protection" },
+  { id: "eye_cream", label: "Eye cream", icon: "◑", sub: "Under-eye treatment" },
+  { id: "face_mask", label: "Face mask", icon: "⊙", sub: "Weekly treatment mask" },
+  { id: "exfoliant", label: "Exfoliant", icon: "⚗", sub: "AHA / BHA / enzyme" },
+];
+
+const BUDGET_OPTIONS = [
+  { id: "budget", label: "Budget", sub: "Under ₹500" },
+  { id: "mid", label: "Mid-range", sub: "₹500–2000" },
+  { id: "premium", label: "Premium", sub: "₹2000–6000" },
+  { id: "luxury", label: "Luxury", sub: "₹6000+" },
+];
+
+type Step = "upload" | "concerns" | "product" | "filters";
 
 export default function Home() {
   const router = useRouter();
-  const { setSubmittedUrl, setSkinProfile } = useResult();
-
-  const [url, setUrl] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [profileOpen, setProfileOpen] = useState(false);
-
-  // Profile state
-  const [skinType, setSkinType] = useState<SkinProfile["skin_type"] | "">("");
+  const { setSkinProfile, setUploadedImageBase64 } = useResult();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [step, setStep] = useState<Step>("upload");
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [imageBase64, setImageBase64] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
   const [selectedConcerns, setSelectedConcerns] = useState<string[]>([]);
-  const [currentRoutine, setCurrentRoutine] = useState("");
-  const [knownAllergies, setKnownAllergies] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState<string>("");
+  const [profile, setProfile] = useState({
+    budget: "mid" as SkinProfile["budget"],
+    fragrance_free: false,
+    vegan_only: false,
+    pregnancy_safe: false,
+    known_allergies: "",
+  });
 
-  function toggleConcern(value: string) {
-    setSelectedConcerns((prev) =>
-      prev.includes(value) ? prev.filter((c) => c !== value) : [...prev, value]
-    );
-  }
+  const handleImageFile = useCallback((file: File) => {
+    if (!file.type.startsWith("image/")) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const result = e.target?.result as string;
+      setImagePreview(result);
+      setImageBase64(result);
+    };
+    reader.readAsDataURL(file);
+  }, []);
 
-  function handleSubmit(e: React.FormEvent) {
+  const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
-    if (!url.trim() || isSubmitting) return;
-    setIsSubmitting(true);
+    setIsDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file) handleImageFile(file);
+  }, [handleImageFile]);
 
-    // Build skin profile if any data entered
-    const hasProfile = skinType || selectedConcerns.length > 0 || currentRoutine.trim() || knownAllergies.trim();
-    if (hasProfile) {
-      const profile: SkinProfile = {
-        ...(skinType ? { skin_type: skinType } : {}),
-        ...(selectedConcerns.length > 0 ? { concerns: selectedConcerns } : {}),
-        ...(currentRoutine.trim() ? { current_routine: currentRoutine.trim() } : {}),
-        ...(knownAllergies.trim() ? { known_allergies: knownAllergies.trim() } : {}),
-      };
-      setSkinProfile(profile);
-    } else {
-      setSkinProfile(null);
-    }
-
-    setSubmittedUrl(url.trim());
+  const handleSubmit = () => {
+    const finalProfile: SkinProfile = {
+      primary_concern: selectedConcerns[0] || "general",
+      product_category: selectedCategory,
+      budget: profile.budget,
+      known_allergies: profile.known_allergies,
+      pregnancy_safe: profile.pregnancy_safe,
+      fragrance_free: profile.fragrance_free,
+      vegan_only: profile.vegan_only,
+    };
+    setSkinProfile(finalProfile);
+    setUploadedImageBase64(imageBase64);
     router.push("/analyzing");
-  }
+  };
 
-  const profileFilled = skinType || selectedConcerns.length > 0 || currentRoutine.trim() || knownAllergies.trim();
+  const stepIndex = ["upload", "concerns", "product", "filters"].indexOf(step);
+  const stepLabels = ["Your skin", "Concerns", "Product", "Filters"];
 
   return (
     <>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,300&display=swap');
-
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;1,400&family=Syne:wght@400;500;600&display=swap');
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
         :root {
-          --cream: #F7F4EF;
-          --cream-dark: #EDE8DF;
-          --ink: #1C1917;
-          --ink-muted: #6B6560;
-          --ink-faint: #A09A93;
-          --green: #2D5016;
-          --green-light: #4A7C2F;
-          --green-muted: #EBF2E4;
-          --border: #DDD8CF;
-          --serif: 'DM Serif Display', Georgia, serif;
-          --sans: 'DM Sans', system-ui, sans-serif;
+          --bg: #0D0D0B; --bg2: #141410; --surface: #1C1C18; --surface2: #242420;
+          --border: #2E2E28; --border-light: #3A3A34;
+          --gold: #C9A84C; --gold-muted: #A8884A; --gold-light: rgba(201,168,76,0.12); --gold-glow: rgba(201,168,76,0.06);
+          --cream: #F2EDE4; --cream-muted: #B8B0A4; --cream-faint: #6B6560;
+          --serif: 'Playfair Display', Georgia, serif; --sans: 'Syne', system-ui, sans-serif;
         }
+        html, body { background: var(--bg); color: var(--cream); font-family: var(--sans); -webkit-font-smoothing: antialiased; min-height: 100vh; }
+        @keyframes fadeUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
 
-        body {
-          background: var(--cream);
-          font-family: var(--sans);
-          color: var(--ink);
-          -webkit-font-smoothing: antialiased;
-        }
+        .page { min-height: 100vh; display: flex; flex-direction: column; }
+        .nav { padding: 20px 40px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); }
+        .nav-logo { font-family: var(--serif); font-size: 16px; color: var(--cream); display: flex; align-items: center; gap: 8px; }
+        .nav-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--gold); }
+        .nav-tag { font-size: 11px; color: var(--cream-faint); letter-spacing: 0.1em; text-transform: uppercase; }
 
-        @keyframes fadeUp {
-          from { opacity: 0; transform: translateY(16px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
+        .main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 24px; }
 
-        @keyframes fadeIn {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
+        /* Step bar */
+        .stepbar { display: flex; align-items: center; gap: 0; margin-bottom: 44px; animation: fadeUp 0.3s ease both; }
+        .step-item { display: flex; align-items: center; gap: 7px; }
+        .step-num { width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--border); font-size: 10px; font-weight: 500; color: var(--cream-faint); display: flex; align-items: center; justify-content: center; transition: all 0.3s; flex-shrink: 0; }
+        .step-num.active { border-color: var(--gold); color: var(--gold); background: var(--gold-light); }
+        .step-num.done { background: var(--gold); border-color: var(--gold); color: var(--bg); }
+        .step-lbl { font-size: 11px; color: var(--cream-faint); letter-spacing: 0.04em; text-transform: uppercase; transition: color 0.3s; }
+        .step-lbl.active { color: var(--gold); }
+        .step-connector { width: 32px; height: 1px; background: var(--border); margin: 0 8px; transition: background 0.3s; }
+        .step-connector.done { background: var(--gold-muted); }
 
-        @keyframes slideDown {
-          from { opacity: 0; transform: translateY(-8px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
+        /* Card */
+        .card { width: 100%; max-width: 540px; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; animation: fadeUp 0.4s ease 0.08s both; }
+        .card-head { padding: 28px 32px 0; }
+        .card-eyebrow { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold); margin-bottom: 8px; }
+        .card-title { font-family: var(--serif); font-size: clamp(20px, 4vw, 26px); color: var(--cream); line-height: 1.2; margin-bottom: 6px; }
+        .card-sub { font-size: 13px; color: var(--cream-faint); line-height: 1.5; }
+        .card-body { padding: 24px 32px 28px; }
 
-        .page {
-          min-height: 100vh;
-          display: grid;
-          grid-template-rows: auto 1fr auto;
-        }
+        /* Upload */
+        .drop-zone { border: 1.5px dashed var(--border-light); border-radius: 12px; padding: 36px 20px; text-align: center; cursor: pointer; transition: all 0.2s; background: var(--bg2); position: relative; overflow: hidden; }
+        .drop-zone:hover, .drop-zone.drag { border-color: var(--gold-muted); background: var(--gold-glow); }
+        .drop-zone.filled { border-style: solid; border-color: var(--gold); padding: 0; }
+        .drop-icon { font-size: 28px; margin-bottom: 10px; display: block; }
+        .drop-title { font-size: 14px; font-weight: 500; color: var(--cream); margin-bottom: 4px; }
+        .drop-sub { font-size: 12px; color: var(--cream-faint); }
+        .drop-preview { width: 100%; height: 220px; object-fit: cover; display: block; }
+        .drop-change { position: absolute; bottom: 0; left: 0; right: 0; background: linear-gradient(transparent, rgba(0,0,0,0.75)); padding: 20px 12px 10px; font-size: 11px; color: var(--cream-muted); cursor: pointer; }
+        .tips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 14px; }
+        .tip { font-size: 11px; color: var(--cream-faint); background: var(--surface2); border: 1px solid var(--border); border-radius: 20px; padding: 3px 10px; }
 
-        /* Nav */
-        .nav {
-          padding: 24px 48px;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          border-bottom: 1px solid var(--border);
-          animation: fadeIn 0.4s ease;
-        }
-        .nav-logo {
-          font-family: var(--serif);
-          font-size: 18px;
-          color: var(--ink);
-          letter-spacing: -0.01em;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-        }
-        .nav-logo-dot {
-          width: 7px;
-          height: 7px;
-          border-radius: 50%;
-          background: var(--green);
-        }
-        .nav-badge {
-          font-size: 12px;
-          font-weight: 500;
-          color: var(--green);
-          background: var(--green-muted);
-          padding: 4px 10px;
-          border-radius: 20px;
-          letter-spacing: 0.01em;
-        }
+        /* Grid selectors */
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+        .sel-btn { padding: 11px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg2); color: var(--cream-muted); font-family: var(--sans); font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 9px; transition: all 0.15s; text-align: left; }
+        .sel-btn:hover { border-color: var(--border-light); color: var(--cream); }
+        .sel-btn.on { border-color: var(--gold); background: var(--gold-light); color: var(--cream); }
+        .sel-btn .ico { font-size: 13px; color: var(--cream-faint); flex-shrink: 0; }
+        .sel-btn.on .ico { color: var(--gold); }
 
-        /* Main */
-        .main {
-          display: flex;
-          align-items: flex-start;
-          justify-content: center;
-          padding: 56px 24px 64px;
-        }
-        .container {
-          width: 100%;
-          max-width: 620px;
-        }
+        /* Product category cards — bigger with subtitle */
+        .cat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .cat-btn { padding: 14px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg2); color: var(--cream-muted); font-family: var(--sans); cursor: pointer; display: flex; align-items: flex-start; gap: 10px; transition: all 0.15s; text-align: left; }
+        .cat-btn:hover { border-color: var(--border-light); color: var(--cream); }
+        .cat-btn.on { border-color: var(--gold); background: var(--gold-light); color: var(--cream); }
+        .cat-ico { font-size: 16px; color: var(--cream-faint); flex-shrink: 0; margin-top: 1px; }
+        .cat-btn.on .cat-ico { color: var(--gold); }
+        .cat-name { font-size: 13px; font-weight: 500; margin-bottom: 2px; }
+        .cat-sub { font-size: 11px; color: var(--cream-faint); }
+        .cat-btn.on .cat-sub { color: var(--gold-muted); }
 
-        /* Eyebrow */
-        .eyebrow {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          margin-bottom: 24px;
-          animation: fadeUp 0.5s ease 0.1s both;
-        }
-        .eyebrow-line { width: 24px; height: 1px; background: var(--green); }
-        .eyebrow-text {
-          font-size: 12px;
-          font-weight: 500;
-          letter-spacing: 0.08em;
-          text-transform: uppercase;
-          color: var(--green);
-        }
+        /* Budget row */
+        .budget-row { display: flex; gap: 8px; }
+        .bud-btn { flex: 1; padding: 9px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg2); color: var(--cream-muted); font-family: var(--sans); font-size: 12px; cursor: pointer; text-align: center; transition: all 0.15s; }
+        .bud-btn:hover { border-color: var(--border-light); }
+        .bud-btn.on { border-color: var(--gold); background: var(--gold-light); color: var(--cream); }
+        .bud-sub { font-size: 10px; color: var(--cream-faint); margin-top: 2px; }
+        .bud-btn.on .bud-sub { color: var(--gold-muted); }
 
-        /* Headline */
-        .headline {
-          font-family: var(--serif);
-          font-size: clamp(36px, 6vw, 54px);
-          line-height: 1.08;
-          letter-spacing: -0.02em;
-          color: var(--ink);
-          margin-bottom: 20px;
-          animation: fadeUp 0.5s ease 0.15s both;
-        }
-        .headline em { font-style: italic; color: var(--green); }
+        /* Toggles */
+        .toggle-group { margin-top: 16px; }
+        .toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 9px 0; border-bottom: 1px solid var(--border); }
+        .toggle-row:last-of-type { border-bottom: none; }
+        .toggle-lbl { font-size: 13px; color: var(--cream-muted); }
+        .tog { width: 34px; height: 19px; border-radius: 10px; background: var(--surface2); border: 1px solid var(--border); cursor: pointer; position: relative; transition: all 0.2s; flex-shrink: 0; }
+        .tog.on { background: var(--gold); border-color: var(--gold); }
+        .tog::after { content: ''; position: absolute; width: 13px; height: 13px; border-radius: 50%; background: var(--cream-faint); top: 2px; left: 2px; transition: all 0.2s; }
+        .tog.on::after { left: 17px; background: var(--bg); }
 
-        .subtext {
-          font-size: 16px;
-          line-height: 1.65;
-          color: var(--ink-muted);
-          font-weight: 300;
-          margin-bottom: 36px;
-          max-width: 480px;
-          animation: fadeUp 0.5s ease 0.2s both;
-        }
+        /* Allergy input */
+        .txt-input { width: 100%; background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 9px 12px; color: var(--cream); font-family: var(--sans); font-size: 13px; outline: none; transition: border-color 0.15s; margin-top: 10px; }
+        .txt-input:focus { border-color: var(--border-light); }
+        .txt-input::placeholder { color: var(--cream-faint); }
 
-        /* Form */
-        .form { animation: fadeUp 0.5s ease 0.25s both; }
+        /* Labels */
+        .lbl { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--cream-faint); margin-bottom: 10px; margin-top: 20px; display: block; }
+        .lbl:first-child { margin-top: 0; }
+        .hint { font-size: 11px; color: var(--cream-faint); text-align: center; margin-top: 10px; }
 
-        .input-wrapper {
-          position: relative;
-          margin-bottom: 12px;
-        }
-        .input {
-          width: 100%;
-          padding: 16px 20px;
-          padding-right: 160px;
-          border-radius: 10px;
-          border: 1.5px solid var(--border);
-          background: #fff;
-          font-family: var(--sans);
-          font-size: 15px;
-          color: var(--ink);
-          outline: none;
-          transition: border-color 0.2s ease, box-shadow 0.2s ease;
-          font-weight: 300;
-        }
-        .input::placeholder { color: var(--ink-faint); }
-        .input:focus {
-          border-color: var(--green);
-          box-shadow: 0 0 0 3px rgba(45, 80, 22, 0.08);
-        }
-        .input:disabled { opacity: 0.6; cursor: not-allowed; }
+        /* CTA */
+        .cta { width: 100%; padding: 13px; background: var(--gold); color: var(--bg); border: none; border-radius: 10px; font-family: var(--sans); font-size: 14px; font-weight: 600; cursor: pointer; margin-top: 22px; transition: all 0.2s; letter-spacing: 0.02em; }
+        .cta:hover { background: #D4B05A; transform: translateY(-1px); }
+        .cta:disabled { opacity: 0.35; cursor: not-allowed; transform: none; }
+        .back-btn { background: none; border: none; color: var(--cream-faint); font-family: var(--sans); font-size: 12px; cursor: pointer; padding: 0 0 14px; display: flex; align-items: center; gap: 5px; transition: color 0.15s; }
+        .back-btn:hover { color: var(--cream-muted); }
 
-        .submit-btn {
-          position: absolute;
-          right: 6px;
-          top: 50%;
-          transform: translateY(-50%);
-          padding: 10px 20px;
-          border-radius: 7px;
-          border: none;
-          background: var(--green);
-          color: #fff;
-          font-family: var(--sans);
-          font-size: 14px;
-          font-weight: 500;
-          cursor: pointer;
-          transition: background 0.15s ease;
-          white-space: nowrap;
-          letter-spacing: 0.01em;
-        }
-        .submit-btn:hover:not(:disabled) { background: var(--green-light); }
-        .submit-btn:disabled { background: var(--ink-faint); cursor: not-allowed; }
-
-        .input-hint {
-          font-size: 13px;
-          color: var(--ink-faint);
-          font-weight: 300;
-          margin-bottom: 16px;
-        }
-
-        /* Profile toggle */
-        .profile-toggle {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          background: none;
-          border: 1.5px dashed var(--border);
-          border-radius: 8px;
-          padding: 11px 16px;
-          cursor: pointer;
-          width: 100%;
-          font-family: var(--sans);
-          font-size: 13px;
-          font-weight: 500;
-          color: var(--ink-muted);
-          transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease;
-          margin-bottom: 24px;
-          text-align: left;
-        }
-        .profile-toggle:hover {
-          border-color: var(--green);
-          color: var(--green);
-          background: var(--green-muted);
-        }
-        .profile-toggle.active {
-          border-color: var(--green);
-          border-style: solid;
-          color: var(--green);
-          background: var(--green-muted);
-        }
-        .profile-toggle-icon {
-          font-size: 15px;
-          flex-shrink: 0;
-        }
-        .profile-toggle-text { flex: 1; }
-        .profile-toggle-chevron {
-          font-size: 11px;
-          transition: transform 0.2s ease;
-          flex-shrink: 0;
-        }
-        .profile-toggle-chevron.open { transform: rotate(180deg); }
-        .profile-badge {
-          font-size: 11px;
-          font-weight: 600;
-          background: var(--green);
-          color: #fff;
-          padding: 2px 7px;
-          border-radius: 10px;
-          flex-shrink: 0;
-        }
-
-        /* Profile panel */
-        .profile-panel {
-          background: #fff;
-          border: 1px solid var(--border);
-          border-radius: 10px;
-          padding: 24px;
-          margin-bottom: 24px;
-          animation: slideDown 0.2s ease;
-        }
-
-        .profile-section { margin-bottom: 22px; }
-        .profile-section:last-child { margin-bottom: 0; }
-
-        .profile-label {
-          font-size: 12px;
-          font-weight: 600;
-          letter-spacing: 0.05em;
-          text-transform: uppercase;
-          color: var(--ink-muted);
-          margin-bottom: 10px;
-          display: block;
-        }
-        .profile-optional {
-          font-size: 11px;
-          font-weight: 400;
-          letter-spacing: 0;
-          text-transform: none;
-          color: var(--ink-faint);
-          margin-left: 6px;
-        }
-
-        /* Skin type pills */
-        .skin-type-row {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 8px;
-        }
-        .skin-type-pill {
-          padding: 7px 14px;
-          border-radius: 20px;
-          border: 1.5px solid var(--border);
-          background: var(--cream);
-          font-family: var(--sans);
-          font-size: 13px;
-          font-weight: 400;
-          color: var(--ink-muted);
-          cursor: pointer;
-          transition: all 0.15s ease;
-        }
-        .skin-type-pill:hover {
-          border-color: var(--green);
-          color: var(--green);
-        }
-        .skin-type-pill.selected {
-          border-color: var(--green);
-          background: var(--green);
-          color: #fff;
-          font-weight: 500;
-        }
-
-        /* Concern checkboxes */
-        .concerns-grid {
-          display: grid;
-          grid-template-columns: repeat(2, 1fr);
-          gap: 8px;
-        }
-        .concern-item {
-          display: flex;
-          align-items: center;
-          gap: 9px;
-          padding: 9px 12px;
-          border-radius: 8px;
-          border: 1.5px solid var(--border);
-          background: var(--cream);
-          cursor: pointer;
-          transition: all 0.15s ease;
-          user-select: none;
-        }
-        .concern-item:hover {
-          border-color: var(--green);
-          background: var(--green-muted);
-        }
-        .concern-item.checked {
-          border-color: var(--green);
-          background: var(--green-muted);
-        }
-        .concern-checkbox {
-          width: 16px;
-          height: 16px;
-          border-radius: 4px;
-          border: 1.5px solid var(--border);
-          background: #fff;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          flex-shrink: 0;
-          transition: all 0.15s ease;
-          font-size: 10px;
-          color: #fff;
-        }
-        .concern-item.checked .concern-checkbox {
-          border-color: var(--green);
-          background: var(--green);
-        }
-        .concern-label {
-          font-size: 13px;
-          color: var(--ink-muted);
-          font-weight: 400;
-          transition: color 0.15s ease;
-        }
-        .concern-item.checked .concern-label {
-          color: var(--green);
-          font-weight: 500;
-        }
-
-        /* Text inputs */
-        .profile-input {
-          width: 100%;
-          padding: 11px 14px;
-          border-radius: 8px;
-          border: 1.5px solid var(--border);
-          background: var(--cream);
-          font-family: var(--sans);
-          font-size: 14px;
-          color: var(--ink);
-          font-weight: 300;
-          outline: none;
-          transition: border-color 0.2s ease, box-shadow 0.2s ease;
-        }
-        .profile-input::placeholder { color: var(--ink-faint); }
-        .profile-input:focus {
-          border-color: var(--green);
-          box-shadow: 0 0 0 3px rgba(45, 80, 22, 0.08);
-          background: #fff;
-        }
-        .profile-input-hint {
-          font-size: 12px;
-          color: var(--ink-faint);
-          font-weight: 300;
-          margin-top: 6px;
-        }
-
-        /* Divider */
-        .divider {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          margin-bottom: 28px;
-          animation: fadeUp 0.5s ease 0.3s both;
-        }
-        .divider-line { flex: 1; height: 1px; background: var(--border); }
-        .divider-text { font-size: 12px; color: var(--ink-faint); font-weight: 400; letter-spacing: 0.03em; }
-
-        /* Pillars */
-        .pillars {
-          display: grid;
-          grid-template-columns: repeat(3, 1fr);
-          gap: 16px;
-          animation: fadeUp 0.5s ease 0.35s both;
-        }
-        .pillar {
-          background: #fff;
-          border: 1px solid var(--border);
-          border-radius: 10px;
-          padding: 20px;
-        }
-        .pillar-icon {
-          width: 32px;
-          height: 32px;
-          background: var(--green-muted);
-          border-radius: 8px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          margin-bottom: 12px;
-          font-size: 15px;
-        }
-        .pillar-title { font-size: 13px; font-weight: 500; color: var(--ink); margin-bottom: 4px; }
-        .pillar-desc { font-size: 12px; line-height: 1.5; color: var(--ink-muted); font-weight: 300; }
-
-        /* Footer */
-        .footer {
-          padding: 20px 48px;
-          border-top: 1px solid var(--border);
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          animation: fadeIn 0.4s ease 0.4s both;
-        }
-        .footer-text { font-size: 12px; color: var(--ink-faint); font-weight: 300; }
-        .footer-disclaimer { font-size: 12px; color: var(--ink-faint); font-weight: 300; font-style: italic; }
-
-        /* Responsive */
-        @media (max-width: 600px) {
-          .nav { padding: 20px 24px; }
-          .main { padding: 40px 16px 56px; }
-          .footer { flex-direction: column; gap: 8px; padding: 20px 24px; text-align: center; }
-          .pillars { grid-template-columns: 1fr; }
-          .input { padding-right: 16px; }
-          .submit-btn { position: static; transform: none; width: 100%; margin-top: 8px; padding: 14px; border-radius: 8px; }
-          .input-wrapper { display: flex; flex-direction: column; }
-          .concerns-grid { grid-template-columns: 1fr; }
+        .footer { text-align: center; padding: 20px; font-size: 11px; color: var(--cream-faint); }
+        @media (max-width: 480px) {
+          .nav { padding: 16px 20px; }
+          .card-head { padding: 22px 22px 0; }
+          .card-body { padding: 18px 22px 22px; }
+          .cat-grid { grid-template-columns: 1fr; }
+          .budget-row { flex-wrap: wrap; }
         }
       `}</style>
 
       <div className="page">
         <nav className="nav">
-          <div className="nav-logo">
-            <div className="nav-logo-dot" />
-            Before You Buy
-          </div>
-          <span className="nav-badge">Dermatology-informed</span>
+          <div className="nav-logo"><div className="nav-dot" />Before You Buy</div>
+          <div className="nav-tag">Skin-first. Brand-neutral.</div>
         </nav>
 
         <main className="main">
-          <div className="container">
-            <div className="eyebrow">
-              <div className="eyebrow-line" />
-              <span className="eyebrow-text">Formulation Analysis</span>
-            </div>
+          {/* Step bar */}
+          <div className="stepbar">
+            {stepLabels.map((lbl, i) => (
+              <div key={lbl} className="step-item">
+                {i > 0 && <div className={`step-connector ${i <= stepIndex ? "done" : ""}`} />}
+                <div className={`step-num ${i === stepIndex ? "active" : i < stepIndex ? "done" : ""}`}>
+                  {i < stepIndex ? "✓" : i + 1}
+                </div>
+                <span className={`step-lbl ${i === stepIndex ? "active" : ""}`}>{lbl}</span>
+              </div>
+            ))}
+          </div>
 
-            <h1 className="headline">
-              Know what&rsquo;s really<br />
-              <em>in your skincare.</em>
-            </h1>
-
-            <p className="subtext">
-              Paste any product link for a dermatologist-level formulation screen.
-              We flag real risks, ingredient conflicts, and skin-type mismatches — before you buy.
-            </p>
-
-            <form className="form" onSubmit={handleSubmit}>
-              {/* URL input */}
-              <div className="input-wrapper">
-                <input
-                  className="input"
-                  type="url"
-                  placeholder="https://sephora.com/product/..."
-                  value={url}
-                  onChange={(e) => setUrl(e.target.value)}
-                  disabled={isSubmitting}
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-                <button
-                  className="submit-btn"
-                  type="submit"
-                  disabled={isSubmitting || !url.trim()}
+          {/* ── Step 1: Upload ── */}
+          {step === "upload" && (
+            <div className="card">
+              <div className="card-head">
+                <div className="card-eyebrow">Step 1 of 4</div>
+                <div className="card-title">Show us your skin</div>
+                <div className="card-sub">A clear selfie in natural light, no makeup. We use AI to analyse your skin conditions.</div>
+              </div>
+              <div className="card-body">
+                <input ref={fileInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={e => { const f = e.target.files?.[0]; if (f) handleImageFile(f); }} />
+                <div
+                  className={`drop-zone ${isDragging ? "drag" : ""} ${imagePreview ? "filled" : ""}`}
+                  onClick={() => !imagePreview && fileInputRef.current?.click()}
+                  onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
+                  onDragLeave={() => setIsDragging(false)}
+                  onDrop={handleDrop}
                 >
-                  {isSubmitting ? "Analysing…" : "Check product →"}
+                  {imagePreview ? (
+                    <>
+                      <img src={imagePreview} alt="Your skin" className="drop-preview" />
+                      <div className="drop-change" onClick={() => fileInputRef.current?.click()}>Tap to change photo</div>
+                    </>
+                  ) : (
+                    <>
+                      <span className="drop-icon">◎</span>
+                      <div className="drop-title">Upload a selfie</div>
+                      <div className="drop-sub">Drag & drop or tap to browse</div>
+                    </>
+                  )}
+                </div>
+                {!imagePreview && (
+                  <div className="tips">
+                    <span className="tip">Natural light</span>
+                    <span className="tip">No makeup</span>
+                    <span className="tip">Front-facing</span>
+                    <span className="tip">Bare skin</span>
+                  </div>
+                )}
+                <button className="cta" disabled={!imagePreview} onClick={() => setStep("concerns")}>
+                  Continue →
                 </button>
               </div>
-              <p className="input-hint">
-                Works with Sephora, LOOKFANTASTIC, Cult Beauty, brand websites & more
-              </p>
+            </div>
+          )}
 
-              {/* Skin profile toggle */}
-              <button
-                type="button"
-                className={`profile-toggle ${profileOpen ? "active" : ""}`}
-                onClick={() => setProfileOpen((o) => !o)}
-              >
-                <span className="profile-toggle-icon">🧴</span>
-                <span className="profile-toggle-text">
-                  {profileFilled
-                    ? "Your skin profile (personalises results)"
-                    : "Add your skin profile for personalised analysis"}
-                </span>
-                {profileFilled && !profileOpen && (
-                  <span className="profile-badge">✓ Added</span>
-                )}
-                <span className={`profile-toggle-chevron ${profileOpen ? "open" : ""}`}>▼</span>
-              </button>
-
-              {/* Skin profile panel */}
-              {profileOpen && (
-                <div className="profile-panel">
-
-                  {/* Skin type */}
-                  <div className="profile-section">
-                    <label className="profile-label">
-                      Skin type
-                    </label>
-                    <div className="skin-type-row">
-                      {SKIN_TYPES.map((type) => (
-                        <button
-                          key={type.value}
-                          type="button"
-                          className={`skin-type-pill ${skinType === type.value ? "selected" : ""}`}
-                          onClick={() => setSkinType(skinType === type.value ? "" : type.value)}
-                        >
-                          {type.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Concerns */}
-                  <div className="profile-section">
-                    <label className="profile-label">
-                      Skin concerns
-                      <span className="profile-optional">pick all that apply</span>
-                    </label>
-                    <div className="concerns-grid">
-                      {CONCERNS.map((concern) => {
-                        const checked = selectedConcerns.includes(concern.value);
-                        return (
-                          <div
-                            key={concern.value}
-                            className={`concern-item ${checked ? "checked" : ""}`}
-                            onClick={() => toggleConcern(concern.value)}
-                          >
-                            <div className="concern-checkbox">
-                              {checked && "✓"}
-                            </div>
-                            <span className="concern-label">{concern.label}</span>
-                          </div>
+          {/* ── Step 2: Concerns ── */}
+          {step === "concerns" && (
+            <div className="card">
+              <div className="card-head">
+                <div className="card-eyebrow">Step 2 of 4</div>
+                <div className="card-title">What are your main concerns?</div>
+                <div className="card-sub">Pick up to 3. We'll prioritise products that target these specifically.</div>
+              </div>
+              <div className="card-body">
+                <button className="back-btn" onClick={() => setStep("upload")}>← Back</button>
+                <div className="grid-2">
+                  {CONCERNS.map(c => (
+                    <button
+                      key={c.id}
+                      className={`sel-btn ${selectedConcerns.includes(c.id) ? "on" : ""}`}
+                      onClick={() => {
+                        setSelectedConcerns(prev =>
+                          prev.includes(c.id) ? prev.filter(x => x !== c.id) : prev.length < 3 ? [...prev, c.id] : prev
                         );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Current routine */}
-                  <div className="profile-section">
-                    <label className="profile-label">
-                      Current actives in your routine
-                      <span className="profile-optional">optional</span>
-                    </label>
-                    <input
-                      className="profile-input"
-                      type="text"
-                      placeholder="e.g. retinol, vitamin C serum, niacinamide"
-                      value={currentRoutine}
-                      onChange={(e) => setCurrentRoutine(e.target.value)}
-                    />
-                    <p className="profile-input-hint">
-                      Helps us flag conflicts with products you already use
-                    </p>
-                  </div>
-
-                  {/* Known allergies */}
-                  <div className="profile-section">
-                    <label className="profile-label">
-                      Known sensitivities or allergies
-                      <span className="profile-optional">optional</span>
-                    </label>
-                    <input
-                      className="profile-input"
-                      type="text"
-                      placeholder="e.g. fragrance, alcohol, nickel"
-                      value={knownAllergies}
-                      onChange={(e) => setKnownAllergies(e.target.value)}
-                    />
-                  </div>
-
+                      }}
+                    >
+                      <span className="ico">{c.icon}</span>{c.label}
+                    </button>
+                  ))}
                 </div>
-              )}
-            </form>
-
-            <div className="divider">
-              <div className="divider-line" />
-              <span className="divider-text">What we analyse</span>
-              <div className="divider-line" />
-            </div>
-
-            <div className="pillars">
-              <div className="pillar">
-                <div className="pillar-icon">⚗️</div>
-                <div className="pillar-title">Active ingredients</div>
-                <div className="pillar-desc">Identifies actives, estimates concentrations, flags pH dependencies</div>
-              </div>
-              <div className="pillar">
-                <div className="pillar-icon">⚡</div>
-                <div className="pillar-title">Conflicts & interactions</div>
-                <div className="pillar-desc">Detects ingredient clashes like retinol + AHA or benzoyl peroxide + retinol</div>
-              </div>
-              <div className="pillar">
-                <div className="pillar-icon">🧬</div>
-                <div className="pillar-title">Skin type fit</div>
-                <div className="pillar-desc">Rates suitability across oily, dry, combination, sensitive and normal skin</div>
+                {selectedConcerns.length === 3 && <div className="hint">Maximum 3 selected</div>}
+                <button className="cta" disabled={selectedConcerns.length === 0} onClick={() => setStep("product")}>
+                  Continue →
+                </button>
               </div>
             </div>
-          </div>
+          )}
+
+          {/* ── Step 3: Product category ── */}
+          {step === "product" && (
+            <div className="card">
+              <div className="card-head">
+                <div className="card-eyebrow">Step 3 of 4</div>
+                <div className="card-title">What are you looking to buy?</div>
+                <div className="card-sub">Pick one. We'll find the best options for your specific skin profile.</div>
+              </div>
+              <div className="card-body">
+                <button className="back-btn" onClick={() => setStep("concerns")}>← Back</button>
+                <div className="cat-grid">
+                  {PRODUCT_CATEGORIES.map(c => (
+                    <button
+                      key={c.id}
+                      className={`cat-btn ${selectedCategory === c.id ? "on" : ""}`}
+                      onClick={() => setSelectedCategory(c.id)}
+                    >
+                      <span className="cat-ico">{c.icon}</span>
+                      <div>
+                        <div className="cat-name">{c.label}</div>
+                        <div className="cat-sub">{c.sub}</div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+                <button className="cta" disabled={!selectedCategory} onClick={() => setStep("filters")}>
+                  Continue →
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ── Step 4: Filters ── */}
+          {step === "filters" && (
+            <div className="card">
+              <div className="card-head">
+                <div className="card-eyebrow">Step 4 of 4</div>
+                <div className="card-title">Almost done</div>
+                <div className="card-sub">Set your budget and any preferences. We'll filter accordingly.</div>
+              </div>
+              <div className="card-body">
+                <button className="back-btn" onClick={() => setStep("product")}>← Back</button>
+
+                <span className="lbl">Budget per product</span>
+                <div className="budget-row">
+                  {BUDGET_OPTIONS.map(b => (
+                    <button
+                      key={b.id}
+                      className={`bud-btn ${profile.budget === b.id ? "on" : ""}`}
+                      onClick={() => setProfile(p => ({ ...p, budget: b.id as SkinProfile["budget"] }))}
+                    >
+                      {b.label}
+                      <div className="bud-sub">{b.sub}</div>
+                    </button>
+                  ))}
+                </div>
+
+                <div className="toggle-group">
+                  {[
+                    { key: "fragrance_free", label: "Fragrance-free only" },
+                    { key: "vegan_only", label: "Vegan products only" },
+                    { key: "pregnancy_safe", label: "Pregnancy-safe formulas" },
+                  ].map(({ key, label }) => (
+                    <div key={key} className="toggle-row">
+                      <span className="toggle-lbl">{label}</span>
+                      <div
+                        className={`tog ${profile[key as keyof typeof profile] ? "on" : ""}`}
+                        onClick={() => setProfile(p => ({ ...p, [key]: !p[key as keyof typeof p] }))}
+                      />
+                    </div>
+                  ))}
+                </div>
+
+                <span className="lbl" style={{ marginTop: 16 }}>Known allergies or sensitivities</span>
+                <input
+                  type="text"
+                  className="txt-input"
+                  placeholder="e.g. fragrance, niacinamide, lanolin"
+                  value={profile.known_allergies}
+                  onChange={e => setProfile(p => ({ ...p, known_allergies: e.target.value }))}
+                />
+
+                <button className="cta" onClick={handleSubmit}>
+                  Find my {PRODUCT_CATEGORIES.find(c => c.id === selectedCategory)?.label.toLowerCase() || "products"} →
+                </button>
+              </div>
+            </div>
+          )}
         </main>
 
-        <footer className="footer">
-          <span className="footer-text">© 2026 Before You Buy</span>
-          <span className="footer-disclaimer">For informational use only — not a substitute for medical advice</span>
-        </footer>
+        <footer className="footer">For informational use only — not a substitute for medical advice</footer>
       </div>
     </>
   );
