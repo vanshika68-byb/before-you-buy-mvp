@@ -238,13 +238,32 @@ export default function Results() {
 
   const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
+  // Build a concise acne label
+  const acneLabel = skinAnalysis.active_acne.severity === "none"
+    ? "Clear"
+    : `${cap(skinAnalysis.active_acne.severity)} (${
+        [
+          skinAnalysis.active_acne.papules  > 0 ? `${skinAnalysis.active_acne.papules}p` : "",
+          skinAnalysis.active_acne.pustules > 0 ? `${skinAnalysis.active_acne.pustules}pu` : "",
+          skinAnalysis.active_acne.nodules_cysts > 0 ? `${skinAnalysis.active_acne.nodules_cysts}n` : "",
+        ].filter(Boolean).join(" ") || "comedones"
+      })`;
+
+  // PIE / PIH summary
+  const marksLabel = [
+    skinAnalysis.acne_sequelae.pie_red_marks !== "none" ? `PIE: ${skinAnalysis.acne_sequelae.pie_red_marks}` : "",
+    skinAnalysis.acne_sequelae.pih_brown_marks !== "none" ? `PIH: ${skinAnalysis.acne_sequelae.pih_brown_marks}` : "",
+  ].filter(Boolean).join(" · ") || "None";
+
   const skinStats = [
-    { label: "Skin type",    value: cap(skinAnalysis.skin_type) },
-    { label: "Tone",         value: skinAnalysis.tone },
-    { label: "Acne",         value: skinAnalysis.acne_severity === "none" ? "Clear" : cap(skinAnalysis.acne_severity) },
-    { label: "Oiliness",     value: cap(skinAnalysis.oiliness) },
-    { label: "Sensitivity",  value: cap(skinAnalysis.sensitivity) },
-    { label: "Pigmentation", value: skinAnalysis.hyperpigmentation === "none" ? "None" : cap(skinAnalysis.hyperpigmentation) },
+    { label: "Skin type",    value: cap(skinAnalysis.skin_type.replace(/-/g, " ")) },
+    { label: "Tone",         value: skinAnalysis.apparent_skin_tone.descriptive },
+    { label: "Barrier",      value: cap(skinAnalysis.barrier_integrity.replace(/-/g, " ")) },
+    { label: "Acne",         value: acneLabel },
+    { label: "Marks",        value: marksLabel },
+    { label: "Sensitivity",  value: cap(skinAnalysis.sensitivity_level) },
+    { label: "Pigmentation", value: skinAnalysis.hyperpigmentation.level === "none" ? "None" : `${cap(skinAnalysis.hyperpigmentation.level)} (${skinAnalysis.hyperpigmentation.pattern.join(", ") || "—"})` },
+    { label: "Active tolerance", value: cap(skinAnalysis.tolerance_for_strong_actives) },
   ];
 
   return (
@@ -361,7 +380,23 @@ export default function Results() {
                   </div>
                 ))}
               </div>
-              <div className="skin-summary">{skinAnalysis.summary}</div>
+              <div className="skin-summary">
+                {skinAnalysis.treatment_priorities.length > 0 && (
+                  <div style={{ marginBottom: 8 }}>
+                    <div style={{ fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase", color: "#C9A84C", marginBottom: 6 }}>Treatment priorities</div>
+                    {skinAnalysis.treatment_priorities.map((p, i) => (
+                      <div key={i} style={{ display: "flex", gap: 6, fontSize: 11, color: "#B8B0A4", marginBottom: 4, lineHeight: 1.4 }}>
+                        <span style={{ color: "#C9A84C", flexShrink: 0 }}>{i + 1}.</span>{p}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {skinAnalysis.confidence_score > 0 && skinAnalysis.confidence_score < 70 && skinAnalysis.limitations && (
+                  <div style={{ fontSize: 11, color: "#F87171", marginTop: 6, lineHeight: 1.4 }}>
+                    ⚠ {skinAnalysis.limitations}
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -372,9 +407,21 @@ export default function Results() {
           <div className="skin-panel">
             <div className="skin-card">
               <div className="skin-card-top">
-                <div className="skin-card-icon">◎</div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                  <div className="skin-card-icon" style={{ marginBottom: 0 }}>◎</div>
+                  {skinAnalysis.confidence_score > 0 && (
+                    <span style={{
+                      fontSize: 10, padding: "2px 8px", borderRadius: 20, fontWeight: 600,
+                      background: skinAnalysis.confidence_score >= 70 ? "rgba(74,222,128,0.1)" : "rgba(248,113,113,0.1)",
+                      color: skinAnalysis.confidence_score >= 70 ? "#4ADE80" : "#F87171",
+                      border: `1px solid ${skinAnalysis.confidence_score >= 70 ? "rgba(74,222,128,0.2)" : "rgba(248,113,113,0.2)"}`,
+                    }}>
+                      {skinAnalysis.confidence_score}% confidence
+                    </span>
+                  )}
+                </div>
                 <div className="skin-card-title">Your skin profile</div>
-                <div className="skin-card-sub">Analysed from your photo</div>
+                <div className="skin-card-sub">Fitzpatrick est. {skinAnalysis.estimated_fitzpatrick.range} · {skinAnalysis.apparent_skin_tone.undertone} undertone</div>
               </div>
               <div className="skin-stats">
                 {skinStats.map(({ label, value }) => (
@@ -384,7 +431,23 @@ export default function Results() {
                   </div>
                 ))}
               </div>
-              <div className="skin-summary">{skinAnalysis.summary}</div>
+              <div className="skin-summary">
+                {skinAnalysis.treatment_priorities.length > 0 && (
+                  <div style={{ marginBottom: 8 }}>
+                    <div style={{ fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase", color: "#C9A84C", marginBottom: 6 }}>Treatment priorities</div>
+                    {skinAnalysis.treatment_priorities.map((p, i) => (
+                      <div key={i} style={{ display: "flex", gap: 6, fontSize: 11, color: "#B8B0A4", marginBottom: 4, lineHeight: 1.4 }}>
+                        <span style={{ color: "#C9A84C", flexShrink: 0 }}>{i + 1}.</span>{p}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {skinAnalysis.confidence_score > 0 && skinAnalysis.confidence_score < 70 && skinAnalysis.limitations && (
+                  <div style={{ fontSize: 11, color: "#F87171", marginTop: 6, lineHeight: 1.4 }}>
+                    ⚠ {skinAnalysis.limitations}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 

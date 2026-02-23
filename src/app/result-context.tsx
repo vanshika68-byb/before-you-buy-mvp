@@ -2,16 +2,57 @@
 
 import { createContext, useContext, useState, type ReactNode } from "react";
 
+/* ------------------------------------------------------------------
+ * SkinAnalysis — matches the new dermatologist prompt output exactly
+ * ------------------------------------------------------------------ */
 export type SkinAnalysis = {
-  skin_type: "oily" | "dry" | "combination" | "sensitive" | "normal";
-  concerns: string[];
-  tone: string;
-  acne_severity: "none" | "mild" | "moderate" | "severe";
-  oiliness: "low" | "moderate" | "high";
-  sensitivity: "low" | "moderate" | "high";
-  hyperpigmentation: "none" | "mild" | "moderate" | "significant";
+  primary_skin_pattern: string;
+  skin_type: "oily" | "dry" | "combination" | "normal" | "sensitive-reactive";
+  sebum_distribution: { t_zone: string; cheeks: string };
+  hydration_appearance: string;
+  barrier_integrity: "intact" | "mildly-compromised" | "significantly-compromised";
+
+  active_acne: {
+    open_comedones: number;
+    closed_comedones: number;
+    papules: number;
+    pustules: number;
+    nodules_cysts: number;
+    severity: "none" | "mild" | "moderate" | "severe";
+    distribution: string[];
+  };
+  acne_sequelae: {
+    pie_red_marks: string;
+    pih_brown_marks: string;
+    atrophic_scarring: { present: boolean; types: string[] };
+  };
+
+  hyperpigmentation: { level: string; pattern: string[]; distribution: string[] };
+  vascularity: {
+    erythema_level: string;
+    distribution: string[];
+    telangiectasia: string;
+    rosacea_like_pattern: string;
+  };
+
+  pore_visibility: { level: string; locations: string[] };
+  texture: string;
   visible_aging: "none" | "mild" | "moderate";
-  summary: string;
+
+  apparent_skin_tone: { ita_category: string; descriptive: string; undertone: string };
+  estimated_fitzpatrick: { range: string; confidence: string; caveat: string };
+
+  sensitivity_level: "low" | "moderate" | "high";
+  tolerance_for_strong_actives: "low" | "moderate" | "high";
+
+  treatment_priorities: string[];
+  ingredient_categories_to_prioritize: string[];
+  ingredients_to_avoid_or_use_with_caution: string[];
+  vehicle_recommendation: string;
+  spf_recommendation: string;
+
+  confidence_score: number;
+  limitations: string;
 };
 
 export type ProductRecommendation = {
@@ -29,12 +70,7 @@ export type ProductRecommendation = {
   fragrance_free: boolean;
   cruelty_free: boolean;
   vegan: boolean;
-  links: {
-    nykaa?: string;
-    sephora?: string;
-    amazon?: string;
-    brand?: string;
-  };
+  links: { nykaa?: string; sephora?: string; amazon?: string; brand?: string };
   image_placeholder_color: string;
   explanation: string;
 };
@@ -49,6 +85,9 @@ export type SkinProfile = {
   vegan_only: boolean;
 };
 
+/* ------------------------------------------------------------------
+ * Context
+ * ------------------------------------------------------------------ */
 type ResultContextValue = {
   skinProfile: SkinProfile | null;
   setSkinProfile: (p: SkinProfile | null) => void;
